@@ -954,8 +954,14 @@
                         </StackPanel>
                         <ComboBox Grid.Column="2" ItemsSource="{Binding ArchiveProfiles}"
                                   SelectedItem="{Binding SelectedArchiveProfile}"
-                                  DisplayMemberPath="DisplayName" VerticalAlignment="Center"
-                                  AutomationProperties.Name="Saved collection archive profile" />
+                                  VerticalAlignment="Center"
+                                  AutomationProperties.Name="Saved collection archive profile">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
                         <Button Grid.Column="4" Style="{StaticResource PrimaryButton}" Content="Check all new"
                                 Padding="13,9" VerticalAlignment="Center"
                                 Command="{Binding CheckArchiveProfilesCommand}" />

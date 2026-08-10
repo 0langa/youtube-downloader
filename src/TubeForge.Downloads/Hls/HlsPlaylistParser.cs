@@ -6,7 +6,7 @@ namespace TubeForge.Downloads.Hls;
 
 public static class HlsPlaylistParser
 {
-    public const int MaximumCharacters = 2 * 1024 * 1024;
+    public const int MaximumCharacters = 8 * 1024 * 1024;
     public const int MaximumSegments = 5_000;
     private const int MaximumLines = 20_000;
 

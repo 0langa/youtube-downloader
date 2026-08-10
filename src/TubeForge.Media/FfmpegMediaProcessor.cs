@@ -242,7 +242,7 @@ public sealed class FfmpegMediaProcessor
                 for (var index = 0; index < selections.Count; index++)
                 {
                     arguments.Add($"-metadata:s:s:{index}");
-                    arguments.Add($"language={selections[index].LanguageCode}");
+                    arguments.Add($"language={SubtitleMetadataLanguage(selections[index].LanguageCode)}");
                     arguments.Add($"-disposition:s:{index}");
                     arguments.Add("0");
                 }
@@ -388,7 +388,7 @@ public sealed class FfmpegMediaProcessor
                         for (var index = 0; index < selections.Count; index++)
                         {
                             arguments.Add($"-metadata:s:s:{index}");
-                            arguments.Add($"language={selections[index].LanguageCode}");
+                            arguments.Add($"language={SubtitleMetadataLanguage(selections[index].LanguageCode)}");
                             arguments.Add($"-disposition:s:{index}");
                             arguments.Add("0");
                         }
@@ -821,6 +821,29 @@ public sealed class FfmpegMediaProcessor
         MediaContainer.WebM => "webvtt",
         _ => throw new InvalidOperationException("Unsupported subtitle container.")
     };
+
+    private static string SubtitleMetadataLanguage(string languageCode)
+    {
+        foreach (var candidate in new[] { languageCode, languageCode.Split('-', 2)[0] })
+        {
+            try
+            {
+                var isoCode = CultureInfo.GetCultureInfo(candidate).ThreeLetterISOLanguageName;
+                if (isoCode.Length == 3 && isoCode.All(char.IsAsciiLetter))
+                {
+                    return isoCode.ToLowerInvariant();
+                }
+            }
+            catch (CultureNotFoundException)
+            {
+                // Try the primary subtag, then a safe undefined-language fallback.
+            }
+        }
+
+        return languageCode.Length == 3 && languageCode.All(char.IsAsciiLetter)
+            ? languageCode.ToLowerInvariant()
+            : "und";
+    }
 
     internal static TubeForgeError? ValidateOutput(string path, MediaContainer container) => container switch
     {

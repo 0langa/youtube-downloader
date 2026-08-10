@@ -14,7 +14,7 @@ namespace TubeForge.Downloads.Hls;
 public sealed class HlsCaptureEngine
 {
     private const int BufferSize = 128 * 1024;
-    private const long MaximumPlaylistBytes = 2 * 1024 * 1024;
+    private const long MaximumPlaylistBytes = 8 * 1024 * 1024;
     private const long MaximumSegmentBytes = 64 * 1024 * 1024;
     private const long MaximumInitializationBytes = 16 * 1024 * 1024;
     private const int MaximumJournalBytes = 16 * 1024 * 1024;

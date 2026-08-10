@@ -81,6 +81,37 @@ public static class YouTubeWatchPageParserTests
     }
 
     [Test]
+    public static void MapsDescriptionChaptersFromInitialDataWhenPlayerResponseOmitsThem()
+    {
+        var html = PlayerResponse("""
+            "videoDetails":{
+              "videoId":"Fixture123_","title":"Initial data chapters","lengthSeconds":"123"
+            }
+            """) + """
+            <script>var ytInitialData={
+              "playerOverlays":{"playerOverlayRenderer":{"decoratedPlayerBarRenderer":{"decoratedPlayerBarRenderer":{
+                "playerBar":{"multiMarkersPlayerBarRenderer":{"markersMap":[{
+                  "key":"DESCRIPTION_CHAPTERS",
+                  "value":{"chapters":[
+                    {"chapterRenderer":{"title":{"simpleText":"Introduction"},"timeRangeStartMillis":0}},
+                    {"chapterRenderer":{"title":{"runs":[{"text":"Main "},{"text":"section"}]},"timeRangeStartMillis":60000}}
+                  ]}
+                }]}}
+              }}}}
+            };</script>
+            """;
+
+        var result = YouTubeWatchPageParser.Parse(html);
+
+        Assert.True(result.IsSuccess, result.Error?.TechnicalDetail);
+        Assert.Equal(2, result.Value.Metadata.Chapters.Count);
+        Assert.Equal("Introduction", result.Value.Metadata.Chapters[0].Title);
+        Assert.Equal(TimeSpan.Zero, result.Value.Metadata.Chapters[0].StartTime);
+        Assert.Equal("Main section", result.Value.Metadata.Chapters[1].Title);
+        Assert.Equal(TimeSpan.FromMinutes(1), result.Value.Metadata.Chapters[1].StartTime);
+    }
+
+    [Test]
     public static void RejectsEmptyMalformedAndUnavailableResponses()
     {
         Assert.False(YouTubeWatchPageParser.Parse(null).IsSuccess);
@@ -154,6 +185,11 @@ public static class YouTubeWatchPageParserTests
             },
             "streamingData":{"hlsManifestUrl":"https://manifest.googlevideo.com/api/manifest/hls_playlist/test.m3u8"}
             """));
+        var activeWithoutWatchManifest = YouTubeWatchPageParser.Parse(PlayerResponse("""
+            "videoDetails":{
+              "videoId":"Fixture123_","title":"Active fallback fixture","isLiveContent":true,"isLive":true
+            }
+            """));
         var upcoming = YouTubeWatchPageParser.Parse("""
             <script>var ytInitialPlayerResponse={
               "playabilityStatus":{"status":"LIVE_STREAM_OFFLINE","reason":"Starts later"},
@@ -169,6 +205,11 @@ public static class YouTubeWatchPageParserTests
         Assert.True(active.Value.Metadata.Formats.Single().IsLiveHls);
         Assert.False(active.Value.Metadata.Formats.Single().IsLiveManifestPending);
         Assert.Equal(YouTubeWatchPageParser.LiveHlsFormatId, active.Value.Metadata.Formats.Single().FormatId);
+
+        Assert.True(activeWithoutWatchManifest.IsSuccess, activeWithoutWatchManifest.Error?.Message);
+        Assert.Equal(VideoContentKind.LiveActive, activeWithoutWatchManifest.Value.Metadata.ContentKind);
+        Assert.True(activeWithoutWatchManifest.Value.Metadata.Formats.Single().IsLiveManifestPending);
+        Assert.Equal("LiveManifestClientFallback", activeWithoutWatchManifest.Value.Diagnostics?.Stage);
 
         Assert.True(upcoming.IsSuccess, upcoming.Error?.Message);
         Assert.Equal(VideoContentKind.LiveUpcoming, upcoming.Value.Metadata.ContentKind);

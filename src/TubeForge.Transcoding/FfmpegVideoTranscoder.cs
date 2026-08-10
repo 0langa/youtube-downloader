@@ -87,7 +87,11 @@ public sealed class FfmpegVideoTranscoder
                 "-xerror",
                 "-nostdin"
             };
-            AppendTrimInput(arguments, source, request.Trim);
+            AppendTrimInput(
+                arguments,
+                source,
+                request.Trim,
+                limitInputDuration: request.RemovedSegments.Count > 0);
             arguments.AddRange([
                 "-map",
                 "0:v:0",
@@ -198,17 +202,24 @@ public sealed class FfmpegVideoTranscoder
     private static void AppendTrimInput(
         List<string> arguments,
         string source,
-        MediaTrimRange? trim)
+        MediaTrimRange? trim,
+        bool limitInputDuration)
     {
         if (trim is { } range)
         {
             arguments.AddRange([
                 "-ss", range.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)
             ]);
+            if (limitInputDuration)
+            {
+                arguments.AddRange([
+                    "-t", range.Duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)
+                ]);
+            }
         }
 
         arguments.AddRange(["-i", source]);
-        if (trim is { } selectedRange)
+        if (trim is { } selectedRange && !limitInputDuration)
         {
             arguments.AddRange([
                 "-t", selectedRange.Duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)
@@ -234,6 +245,7 @@ public sealed class FfmpegVideoTranscoder
         var filters = new List<string>();
         if (removedSegments.Count > 0)
         {
+            filters.Add("setpts=PTS-STARTPTS");
             filters.Add($"select=not({RemovalExpression(removedSegments)})");
             filters.Add("setpts=N/FRAME_RATE/TB");
         }
@@ -251,7 +263,7 @@ public sealed class FfmpegVideoTranscoder
         if (removedSegments.Count > 0)
         {
             arguments.AddRange([
-                "-af", $"aselect=not({RemovalExpression(removedSegments)}),asetpts=N/SR/TB"
+                "-af", $"asetpts=PTS-STARTPTS,aselect=not({RemovalExpression(removedSegments)}),asetpts=N/SR/TB"
             ]);
         }
 

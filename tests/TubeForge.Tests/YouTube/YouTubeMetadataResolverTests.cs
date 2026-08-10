@@ -437,6 +437,88 @@ public static class YouTubeMetadataResolverTests
         Assert.SequenceEqual(new[] { "28", "56", "7" }, clientNames);
     }
 
+    [Test]
+    public static async Task ResolvesActiveLiveManifestThroughDirectClientFallback()
+    {
+        const string watchPage = """
+            <script>
+            var ytInitialPlayerResponse={
+              "playabilityStatus":{"status":"OK"},
+              "videoDetails":{"videoId":"Fixture123_","title":"Active watch metadata","isLiveContent":true,"isLive":true}
+            };
+            ytcfg.set({"INNERTUBE_API_KEY":"fixturePublicConfig"});
+            </script>
+            """;
+        const string playerResponse = """
+            {
+              "playabilityStatus":{"status":"OK"},
+              "videoDetails":{"videoId":"Fixture123_","title":"Active client metadata","isLiveContent":true,"isLive":true},
+              "streamingData":{"hlsManifestUrl":"https://manifest.googlevideo.com/api/manifest/hls_playlist/fixture.m3u8"}
+            }
+            """;
+        var requestCount = 0;
+        using var handler = new StubHandler(request =>
+        {
+            requestCount++;
+            if (request.Method == HttpMethod.Get && request.RequestUri?.AbsolutePath == "/watch")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) };
+            }
+
+            if (request.Method == HttpMethod.Post)
+            {
+                Assert.Equal("28", request.Headers.GetValues("X-YouTube-Client-Name").Single());
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(playerResponse) };
+            }
+
+            Assert.Equal("manifest.googlevideo.com", request.RequestUri?.Host);
+            Assert.Equal(0L, request.Headers.Range?.Ranges.Single().From);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("#EXTM3U") };
+        });
+        using var client = new HttpClient(handler);
+        var resolver = new YouTubeMetadataResolver(client);
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+
+        var result = await resolver.ResolveAsync(videoId);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(VideoContentKind.LiveActive, result.Value.Metadata.ContentKind);
+        Assert.True(result.Value.Metadata.Formats.Single().IsLiveHls);
+        Assert.False(result.Value.Metadata.Formats.Single().IsLiveManifestPending);
+        Assert.Equal("ClientResolved:ANDROID_VR+WatchPage", result.Value.Diagnostics?.Stage);
+        Assert.Equal(3, requestCount);
+    }
+
+    [Test]
+    public static async Task RejectsActiveLiveWhenDirectClientsAlsoOmitManifest()
+    {
+        const string activeWithoutManifest = """
+            {
+              "playabilityStatus":{"status":"OK"},
+              "videoDetails":{"videoId":"Fixture123_","title":"Active metadata","isLiveContent":true,"isLive":true}
+            }
+            """;
+        var watchPage = "<script>var ytInitialPlayerResponse=" + activeWithoutManifest +
+                        ";ytcfg.set({\"INNERTUBE_API_KEY\":\"fixturePublicConfig\"});</script>";
+        var requestCount = 0;
+        using var handler = new StubHandler(request =>
+        {
+            requestCount++;
+            return request.Method == HttpMethod.Get
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) }
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(activeWithoutManifest) };
+        });
+        using var client = new HttpClient(handler);
+        var resolver = new YouTubeMetadataResolver(client);
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+
+        var result = await resolver.ResolveAsync(videoId);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Video.LiveManifestUnavailable", result.Error?.Code);
+        Assert.Equal(5, requestCount);
+    }
+
     private static string? QueryValue(Uri uri, string key)
     {
         foreach (var pair in uri.Query.TrimStart('?').Split('&'))

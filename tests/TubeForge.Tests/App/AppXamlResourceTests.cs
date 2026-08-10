@@ -95,6 +95,22 @@ public static class AppXamlResourceTests
     }
 
     [Test]
+    public static void ArchiveProfileSelectorUsesReadableDisplayNames()
+    {
+        var fixtureDirectory = Path.Combine(AppContext.BaseDirectory, "Fixtures");
+        var mainWindowXaml = File.ReadAllText(Path.Combine(fixtureDirectory, "MainWindow.xaml"));
+        var archiveSelector = Regex.Match(
+            mainWindowXaml,
+            "<ComboBox\\b[^>]*AutomationProperties.Name=\\\"Saved collection archive profile\\\"[^>]*>.*?</ComboBox>",
+            RegexOptions.CultureInvariant | RegexOptions.Singleline);
+
+        Assert.True(archiveSelector.Success, "Archive profile selector was not found.");
+        Assert.True(archiveSelector.Value.Contains("<ComboBox.ItemTemplate>", StringComparison.Ordinal));
+        Assert.True(archiveSelector.Value.Contains("Text=\"{Binding DisplayName}\"", StringComparison.Ordinal));
+        Assert.False(archiveSelector.Value.Contains("DisplayMemberPath=", StringComparison.Ordinal));
+    }
+
+    [Test]
     public static void UpdatePromptOffersOneClickVerifiedInstallAndRestart()
     {
         var fixtureDirectory = Path.Combine(AppContext.BaseDirectory, "Fixtures");

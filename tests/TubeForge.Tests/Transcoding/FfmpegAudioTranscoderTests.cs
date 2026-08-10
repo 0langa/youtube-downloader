@@ -97,9 +97,14 @@ public static class FfmpegAudioTranscoderTests
             Assert.True(result.IsSuccess, result.Error?.Message);
             Assert.True(ContainsAdjacent(runner.Arguments, "-ss", "1.25"));
             Assert.True(ContainsAdjacent(runner.Arguments, "-t", "8.25"));
+            Assert.True(
+                Array.IndexOf(runner.Arguments.ToArray(), "-t") <
+                Array.IndexOf(runner.Arguments.ToArray(), "-i"));
             Assert.True(ContainsAdjacent(runner.Arguments, "-c:a", "libmp3lame"));
             Assert.True(runner.Arguments.Any(argument =>
-                argument.Contains("aselect=not(between(t\\,3\\,4))", StringComparison.Ordinal)));
+                argument.StartsWith(
+                    "asetpts=PTS-STARTPTS,aselect=not(between(t\\,3\\,4))",
+                    StringComparison.Ordinal)));
         }
         finally
         {

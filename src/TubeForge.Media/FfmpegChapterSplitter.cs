@@ -227,7 +227,7 @@ public sealed class FfmpegChapterSplitter
             "-ss", Seconds(start), "-i", sourcePath,
             "-t", Seconds(length),
             "-map", "0:v?", "-map", "0:a?", "-map", "0:s?",
-            "-c", "copy", "-avoid_negative_ts", "make_zero", "-reset_timestamps", "1"
+            "-c", "copy", "-reset_timestamps", "1"
         };
         if (container == MediaContainer.Mp4)
         {

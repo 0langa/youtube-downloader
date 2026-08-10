@@ -1,3 +1,4 @@
+using System.Text;
 using TubeForge.Downloads.Hls;
 using TubeForge.Tests.Framework;
 
@@ -72,5 +73,30 @@ public static class HlsPlaylistParserTests
 
         Assert.False(HlsPlaylistParser.Parse("not hls", Origin).IsSuccess);
         Assert.False(HlsPlaylistParser.Parse(new string('x', HlsPlaylistParser.MaximumCharacters + 1), Origin).IsSuccess);
+    }
+
+    [Test]
+    public static void AcceptsBoundedLargeDvrWindowAboveLegacyTwoMegabytes()
+    {
+        var builder = new StringBuilder("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:1000\n");
+        var boundedQuery = new string('a', 1_100);
+        for (var index = 0; index < 2_880; index++)
+        {
+            builder.Append("#EXTINF:6,\nsegment-")
+                .Append(index)
+                .Append(".ts?token=")
+                .Append(boundedQuery)
+                .Append('\n');
+        }
+
+        var playlist = builder.ToString();
+        Assert.True(playlist.Length > 2 * 1024 * 1024);
+        Assert.True(playlist.Length <= HlsPlaylistParser.MaximumCharacters);
+
+        var result = HlsPlaylistParser.Parse(playlist, Origin);
+
+        Assert.True(result.IsSuccess, result.Error?.TechnicalDetail);
+        Assert.Equal(2_880, result.Value.Segments.Count);
+        Assert.Equal(1000L, result.Value.Segments[0].Sequence);
     }
 }

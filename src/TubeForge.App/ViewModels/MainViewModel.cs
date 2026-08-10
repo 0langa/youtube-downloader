@@ -965,25 +965,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     _selectedVideoProcessing = VideoProcessingChoices[0];
                     OnPropertyChanged(nameof(SelectedVideoProcessing));
                 }
-                if (!CanEmbedSelectedCaption)
+                if (!_updatingFormatFilters)
                 {
-                    ClearEmbeddedCaptionSelections();
-                }
-                if (!CanEmbedChapters)
-                {
-                    EmbedChapters = false;
-                }
-                if (!CanSplitChapters)
-                {
-                    SplitChapters = false;
-                }
-                if (!CanTrim)
-                {
-                    EnableTrim = false;
-                }
-                if (!CanUseSponsorBlock)
-                {
-                    EnableSponsorBlock = false;
+                    RevalidateSelectedFormatCapabilities();
                 }
 
                 RefreshCommands();
@@ -1160,7 +1144,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public string SponsorBlockModeNotice =>
         SelectedSponsorBlockMode.Value == SponsorBlockMode.Remove
-            ? "Removal requires a selected audio/video conversion preset and cannot combine with embedded captions or chapters."
+            ? "Removal requires a selected audio/video conversion preset. Embedded captions are rebased; chapter workflows remain unavailable."
             : "Chapter mode keeps media unchanged and adds local timeline markers after the opt-in lookup.";
 
     public bool SponsorCategory
@@ -3354,12 +3338,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         if (sourceIdentity.SponsorBlock is { Mode: SponsorBlockMode.Remove } &&
-            (!sourceIdentity.Output.RequiresTranscode || sourceIdentity.Captions is not null ||
-             sourceIdentity.EmbedChapters || sourceIdentity.SplitChapters))
+            (!sourceIdentity.Output.RequiresTranscode || sourceIdentity.EmbedChapters ||
+             sourceIdentity.SplitChapters))
         {
             return (null, new TubeForgeError(
                 "Queue.InvalidSponsorBlockSelection",
-                "SponsorBlock removal requires conversion without embedded captions or chapter workflows."));
+                "SponsorBlock removal requires conversion without chapter workflows."));
         }
 
         if (sourceIdentity.SponsorBlock is { Mode: SponsorBlockMode.Chapters } &&
@@ -4228,21 +4212,39 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     return (downloaded.Error, CompletedOrPartialLength(mediaPath));
                 }
 
-                if (work.Trim is { } trim)
+                if (work.Trim is not null || work.RemovedSponsorSegments.Count > 0)
                 {
                     try
                     {
                         var captionContent = await File.ReadAllTextAsync(captionPath, cancellationToken)
                             .ConfigureAwait(false);
-                        var trimmedCaption = SubRipTimelineTrimmer.Trim(captionContent, trim);
-                        if (!trimmedCaption.IsSuccess)
+                        if (work.Trim is { } trim)
                         {
-                            return (trimmedCaption.Error, CompletedOrPartialLength(mediaPath));
+                            var trimmedCaption = SubRipTimelineTrimmer.Trim(captionContent, trim);
+                            if (!trimmedCaption.IsSuccess)
+                            {
+                                return (trimmedCaption.Error, CompletedOrPartialLength(mediaPath));
+                            }
+
+                            captionContent = trimmedCaption.Value;
+                        }
+
+                        if (work.RemovedSponsorSegments.Count > 0)
+                        {
+                            var editedCaption = SubRipTimelineTrimmer.RemoveSegments(
+                                captionContent,
+                                work.RemovedSponsorSegments);
+                            if (!editedCaption.IsSuccess)
+                            {
+                                return (editedCaption.Error, CompletedOrPartialLength(mediaPath));
+                            }
+
+                            captionContent = editedCaption.Value;
                         }
 
                         await File.WriteAllTextAsync(
                             captionPath,
-                            trimmedCaption.Value,
+                            captionContent,
                             new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
                             cancellationToken).ConfigureAwait(false);
                     }
@@ -4250,7 +4252,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     {
                         return (new TubeForgeError(
                             "Caption.WriteFailed",
-                            "TubeForge could not align an embedded subtitle track to the trim range.",
+                            "TubeForge could not align an embedded subtitle track to the edited media timeline.",
                             exception.GetType().Name), CompletedOrPartialLength(mediaPath));
                     }
                 }
@@ -4630,9 +4632,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             Index = index,
             IndexWidth = indexWidth
         });
-        return rendered.IsSuccess && includeQualityInFileName
-            ? Result<string>.Success($"{rendered.Value} {quality}")
-            : rendered;
+        if (!rendered.IsSuccess)
+        {
+            return rendered;
+        }
+
+        var stem = rendered.Value.TrimEnd();
+        if (stem.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+        {
+            stem = stem[..^extension.Length].TrimEnd();
+        }
+
+        return includeQualityInFileName
+            ? Result<string>.Success($"{stem} {quality}")
+            : Result<string>.Success(stem);
     }
 
     private static string DuplicateDescription(DownloadDuplicateKind kind) => kind switch
@@ -5176,13 +5189,38 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     SelectedAudioCodec = null;
                 }
             }
+
+            RefreshMatchingFormats();
         }
         finally
         {
             _updatingFormatFilters = false;
+            RevalidateSelectedFormatCapabilities();
         }
+    }
 
-        RefreshMatchingFormats();
+    private void RevalidateSelectedFormatCapabilities()
+    {
+        if (!CanEmbedSelectedCaption)
+        {
+            ClearEmbeddedCaptionSelections();
+        }
+        if (!CanEmbedChapters)
+        {
+            EmbedChapters = false;
+        }
+        if (!CanSplitChapters)
+        {
+            SplitChapters = false;
+        }
+        if (!CanTrim)
+        {
+            EnableTrim = false;
+        }
+        if (!CanUseSponsorBlock)
+        {
+            EnableSponsorBlock = false;
+        }
     }
 
     private void RefreshDownloadModes()
@@ -5475,6 +5513,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         SelectAllCollectionCommand.RaiseCanExecuteChanged();
         SelectNoneCollectionCommand.RaiseCanExecuteChanged();
         QueueCollectionCommand.RaiseCanExecuteChanged();
+        SelectMissingCollectionCommand.RaiseCanExecuteChanged();
+        SaveArchiveProfileCommand.RaiseCanExecuteChanged();
+        CheckArchiveProfilesCommand.RaiseCanExecuteChanged();
+        RemoveArchiveProfileCommand.RaiseCanExecuteChanged();
         CancelAnalysisCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
         CheckForUpdatesCommand.RaiseCanExecuteChanged();
@@ -5628,12 +5670,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return false;
         }
 
-        if (mode == SponsorBlockMode.Remove &&
-            (HasSelectedCaptionEmbeds || EmbedChapters || SplitChapters))
+        if (mode == SponsorBlockMode.Remove && (EmbedChapters || SplitChapters))
         {
             error = new TubeForgeError(
                 "SponsorBlock.IncompatibleTimelineMetadata",
-                "SponsorBlock removal cannot combine with embedded captions or chapter workflows.");
+                "SponsorBlock removal cannot combine with chapter workflows.");
             return false;
         }
 

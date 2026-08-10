@@ -2,9 +2,9 @@
 
 YouTube is an upstream service outside TubeForge's control. Compatibility is versioned by TubeForge release and verified with synthetic fixtures plus bounded public canaries; it is not a permanent guarantee.
 
-## v2.2.4 compatibility status
+## v2.2.5 compatibility status
 
-TubeForge v2.2.4 retains the v2.1.0 download and media stack plus the v2.2.3 bounded fallback for modern playlist lockups whose `videoId` moved below nested renderer actions. It also recognizes a continuation response as terminal only when it contains an object `responseContext`, a non-empty string `trackingParams`, no supported videos, and no next token. Initial collection HTML and arbitrary empty or malformed continuation JSON remain fail-closed. Synthetic parser/resolver coverage and a current public resolver canary pass; installed v2.2.4 canary evidence remains required before release closure.
+TubeForge v2.2.5 retains the v2.2.4 strict public-collection continuation handling and adds bounded direct-client recovery when an active-live watch response omits its HLS manifest. A recovered active live remains valid only when a direct client supplies a trusted resolved HLS URL and its media endpoint passes the existing accessibility probe. Current description chapters can also be merged from a bounded assigned `ytInitialData` payload when the strict player response contains none. Malformed initial data, unresolved active-live manifests, initial collection HTML without supported items, and arbitrary empty continuation JSON remain fail-closed. Synthetic parser/resolver coverage and bounded public canaries passed before tagging; installed-release retesting follows publication.
 
 ## v2.1.0 compatibility update
 
@@ -86,7 +86,7 @@ The live 4K canary resolved 27 formats and selected 2160p MP4 video plus AAC aud
 - arbitrary JavaScript execution or general-purpose JavaScript evaluation;
 - formats whose container/codec combination the supported finalization pipeline cannot represent safely.
 
-TubeForge v2.2.4 supports bounded public unencrypted HLS capture plus explicit H.264/AAC, H.265/AAC, and VP9/Opus conversion profiles. Authenticated/access-controlled media and encrypted/DRM HLS remain unsupported.
+TubeForge v2.2.5 supports bounded public unencrypted HLS capture plus explicit H.264/AAC, H.265/AAC, and VP9/Opus conversion profiles. HLS playlists remain independently bounded to 8 MiB, 5,000 segments, 20,000 lines, and existing trusted-host and URI limits. Authenticated/access-controlled media and encrypted/DRM HLS remain unsupported.
 
 Malformed, oversized, or unsupported player scripts fail closed. When public extraction changes, follow the [extractor maintenance playbook](EXTRACTOR_PLAYBOOK.md) and add a sanitized synthetic regression before changing a client profile or transform rule.
 

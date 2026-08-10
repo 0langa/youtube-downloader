@@ -11,7 +11,88 @@ public static class SubRipTimelineTrimmer
 
     public static Result<string> Trim(string content, MediaTrimRange trim)
     {
-        if (string.IsNullOrWhiteSpace(content) || content.Length > MaximumCharacters || !trim.IsValid)
+        if (!trim.IsValid)
+        {
+            return Failure();
+        }
+
+        return Transform(content, (start, end) =>
+        {
+            var clippedStart = start < trim.Start ? trim.Start : start;
+            var clippedEnd = end > trim.End ? trim.End : end;
+            return clippedEnd <= clippedStart
+                ? null
+                : (clippedStart - trim.Start, clippedEnd - trim.Start);
+        });
+    }
+
+    public static Result<string> RemoveSegments(
+        string content,
+        IReadOnlyList<MediaTrimRange> removedSegments)
+    {
+        ArgumentNullException.ThrowIfNull(removedSegments);
+        if (removedSegments.Count > 1_000 || removedSegments.Any(range => !range.IsValid) ||
+            removedSegments.Zip(removedSegments.Skip(1)).Any(pair => pair.First.End > pair.Second.Start))
+        {
+            return Failure();
+        }
+
+        return Transform(content, (start, end) =>
+        {
+            var cursor = start;
+            TimeSpan? firstKept = null;
+            TimeSpan? lastKept = null;
+            foreach (var removed in removedSegments)
+            {
+                if (removed.End <= cursor)
+                {
+                    continue;
+                }
+
+                if (removed.Start >= end)
+                {
+                    break;
+                }
+
+                if (removed.Start > cursor)
+                {
+                    firstKept ??= cursor;
+                    lastKept = removed.Start < end ? removed.Start : end;
+                }
+
+                if (removed.End > cursor)
+                {
+                    cursor = removed.End;
+                }
+
+                if (cursor >= end)
+                {
+                    break;
+                }
+            }
+
+            if (cursor < end)
+            {
+                firstKept ??= cursor;
+                lastKept = end;
+            }
+
+            if (firstKept is not { } keptStart || lastKept is not { } keptEnd || keptEnd <= keptStart)
+            {
+                return null;
+            }
+
+            var adjustedStart = CollapseRemovedTime(keptStart, removedSegments);
+            var adjustedEnd = CollapseRemovedTime(keptEnd, removedSegments);
+            return adjustedEnd <= adjustedStart ? null : (adjustedStart, adjustedEnd);
+        });
+    }
+
+    private static Result<string> Transform(
+        string content,
+        Func<TimeSpan, TimeSpan, (TimeSpan Start, TimeSpan End)?> transform)
+    {
+        if (string.IsNullOrWhiteSpace(content) || content.Length > MaximumCharacters)
         {
             return Failure();
         }
@@ -29,18 +110,17 @@ public static class SubRipTimelineTrimmer
                 return Failure();
             }
 
-            var clippedStart = start < trim.Start ? trim.Start : start;
-            var clippedEnd = end > trim.End ? trim.End : end;
-            if (clippedEnd <= clippedStart)
+            var adjusted = transform(start, end);
+            if (adjusted is not { } timeline)
             {
                 continue;
             }
 
             outputIndex++;
             output.Append(outputIndex).Append("\r\n")
-                .Append(Format(clippedStart - trim.Start))
+                .Append(Format(timeline.Start))
                 .Append(" --> ")
-                .Append(Format(clippedEnd - trim.Start))
+                .Append(Format(timeline.End))
                 .Append("\r\n");
             for (var lineIndex = 2; lineIndex < lines.Length; lineIndex++)
             {
@@ -56,6 +136,30 @@ public static class SubRipTimelineTrimmer
         }
 
         return outputIndex > 0 ? Result<string>.Success(output.ToString()) : Failure();
+    }
+
+    private static TimeSpan CollapseRemovedTime(
+        TimeSpan value,
+        IReadOnlyList<MediaTrimRange> removedSegments)
+    {
+        var removedDuration = TimeSpan.Zero;
+        foreach (var removed in removedSegments)
+        {
+            if (value <= removed.Start)
+            {
+                break;
+            }
+
+            removedDuration += value >= removed.End
+                ? removed.Duration
+                : value - removed.Start;
+            if (value < removed.End)
+            {
+                break;
+            }
+        }
+
+        return value - removedDuration;
     }
 
     private static bool TryParseTiming(string value, out TimeSpan start, out TimeSpan end)
@@ -96,5 +200,5 @@ public static class SubRipTimelineTrimmer
 
     private static Result<string> Failure() => Result<string>.Failure(new TubeForgeError(
         "Caption.InvalidSubRipTimeline",
-        "TubeForge could not safely align the selected subtitles to the trim range."));
+        "TubeForge could not safely align the selected subtitles to the edited media timeline."));
 }

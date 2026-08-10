@@ -139,6 +139,33 @@ public static class HlsCaptureEngineTests
         Assert.Equal("Hls.SegmentsExpired", expired.Error?.Code);
     }
 
+    [Test]
+    public static async Task ReadsBoundedMediaPlaylistAboveLegacyTwoMegabytes()
+    {
+        using var directory = new TestDirectory();
+        var largePlaylist = new StringBuilder("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:42\n");
+        for (var index = 0; index < 2_000; index++)
+        {
+            largePlaylist.Append('#').Append(new string('x', 1_100)).Append('\n');
+        }
+
+        largePlaylist.Append("#EXTINF:6,\n42.ts\n#EXT-X-ENDLIST\n");
+        Assert.True(largePlaylist.Length > 2 * 1024 * 1024);
+        using var client = new HttpClient(new StubHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/live/master.m3u8" => Text(largePlaylist.ToString()),
+            "/live/42.ts" => Bytes("segment"),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        }));
+        var destination = Path.Combine(directory.Path, "large-playlist.source");
+
+        var result = await new HlsCaptureEngine(client, new HostRequestGate())
+            .CaptureAsync(Request(destination));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal("segment", await File.ReadAllTextAsync(destination));
+    }
+
     private static HlsCaptureRequest Request(string destination) => new()
     {
         ManifestUri = Master,

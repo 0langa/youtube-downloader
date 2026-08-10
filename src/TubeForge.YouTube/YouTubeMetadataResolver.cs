@@ -94,7 +94,12 @@ public sealed class YouTubeMetadataResolver
                 return watchResult;
             }
 
-            if (watchResult.Value.Metadata.Formats.Any(format => format.IsLiveHls))
+            var unresolvedActiveLive = watchResult.Value.Metadata.ContentKind == VideoContentKind.LiveActive &&
+                                       watchResult.Value.Metadata.Formats.Any(format =>
+                                           format.IsLiveHls && format.IsLiveManifestPending);
+            if (watchResult.Value.Metadata.ContentKind == VideoContentKind.LiveUpcoming ||
+                watchResult.Value.Metadata.Formats.Any(format =>
+                    format.IsLiveHls && !format.IsLiveManifestPending))
             {
                 return watchResult;
             }
@@ -107,6 +112,13 @@ public sealed class YouTubeMetadataResolver
             if (clientResult is not null && clientResult.Metadata.Formats.Count > 0)
             {
                 return Result<WatchPageData>.Success(MergeClientFormats(watchResult.Value, clientResult));
+            }
+
+            if (unresolvedActiveLive)
+            {
+                return Result<WatchPageData>.Failure(new TubeForgeError(
+                    "Video.LiveManifestUnavailable",
+                    "YouTube did not provide a trusted public HLS manifest for this active stream."));
             }
 
             if (watchResult.Value.Metadata.Formats.Count > 0)
@@ -198,6 +210,7 @@ public sealed class YouTubeMetadataResolver
         Uri watchUrl,
         CancellationToken cancellationToken)
     {
+        var requiresResolvedLiveManifest = fallback.Metadata.ContentKind == VideoContentKind.LiveActive;
         foreach (var profile in new[]
                  {
                      YouTubeClientProfile.AndroidVr,
@@ -212,6 +225,8 @@ public sealed class YouTubeMetadataResolver
                 profile,
                 cancellationToken).ConfigureAwait(false);
             if (result is not null && result.Metadata.Formats.Count > 0 &&
+                (!requiresResolvedLiveManifest || result.Metadata.Formats.Any(format =>
+                    format.IsLiveHls && !format.IsLiveManifestPending)) &&
                 await HasAccessibleMediaAsync(result, watchUrl, cancellationToken).ConfigureAwait(false))
             {
                 return result;

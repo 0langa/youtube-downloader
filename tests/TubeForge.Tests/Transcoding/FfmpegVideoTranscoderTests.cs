@@ -100,10 +100,14 @@ public static class FfmpegVideoTranscoderTests
         Assert.True(result.IsSuccess, result.Error?.Message);
         Assert.True(ContainsAdjacent(runner.Arguments, "-ss", "2.5"));
         Assert.True(ContainsAdjacent(runner.Arguments, "-t", "10.25"));
+        Assert.True(
+            Array.IndexOf(runner.Arguments.ToArray(), "-t") <
+            Array.IndexOf(runner.Arguments.ToArray(), "-i"));
         Assert.True(ContainsAdjacent(runner.Arguments, "-c:v", "libopenh264"));
         Assert.True(runner.Arguments.Any(argument =>
-            argument.Contains("select=not(between(t\\,3\\,4)+between(t\\,6\\,7))", StringComparison.Ordinal)));
-        Assert.True(runner.Arguments.Any(argument => argument.Contains("aselect=not", StringComparison.Ordinal)));
+            argument.StartsWith("setpts=PTS-STARTPTS,select=not(between(t\\,3\\,4)+between(t\\,6\\,7))", StringComparison.Ordinal)));
+        Assert.True(runner.Arguments.Any(argument =>
+            argument.StartsWith("asetpts=PTS-STARTPTS,aselect=not", StringComparison.Ordinal)));
     }
 
     [Test]

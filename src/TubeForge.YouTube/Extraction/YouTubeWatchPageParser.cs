@@ -11,6 +11,7 @@ namespace TubeForge.YouTube.Extraction;
 public static class YouTubeWatchPageParser
 {
     private const string PlayerResponseMarker = "ytInitialPlayerResponse";
+    private const string InitialDataMarker = "ytInitialData";
     public const int LiveHlsFormatId = 1_000_001;
     private static readonly Uri YouTubeOrigin = new("https://www.youtube.com/");
 
@@ -44,7 +45,10 @@ public static class YouTubeWatchPageParser
                     mediaUrlResolver);
                 if (mapped is not null)
                 {
-                    return mapped.Value;
+                    var result = mapped.Value;
+                    return !result.IsSuccess || result.Value.Metadata.Chapters.Count > 0
+                        ? result
+                        : Result<WatchPageData>.Success(MergeInitialDataChapters(result.Value, html));
                 }
             }
             catch (JsonException)
@@ -54,6 +58,38 @@ public static class YouTubeWatchPageParser
         }
 
         return Failure("The watch page did not contain a supported player response.");
+    }
+
+    private static WatchPageData MergeInitialDataChapters(WatchPageData data, string html)
+    {
+        var searchIndex = 0;
+        while (TryFindNextJsonObject(html, InitialDataMarker, searchIndex, out var json, out var nextIndex))
+        {
+            searchIndex = nextIndex;
+            try
+            {
+                using var document = JsonDocument.Parse(json, new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    MaxDepth = 64
+                });
+                var chapters = MapChapters(document.RootElement, data.Metadata.Duration);
+                if (chapters.Count > 0)
+                {
+                    return data with
+                    {
+                        Metadata = data.Metadata with { Chapters = chapters }
+                    };
+                }
+            }
+            catch (JsonException)
+            {
+                // Another occurrence may contain the assigned initial-data payload.
+            }
+        }
+
+        return data;
     }
 
     internal static IReadOnlyList<string> ExtractSignatureCiphers(string html)
@@ -227,9 +263,24 @@ public static class YouTubeWatchPageParser
         {
             if (!TryParseHlsManifest(root, out var manifestUri))
             {
-                return UnsupportedLive(
-                    "Video.LiveManifestUnavailable",
-                    "YouTube did not provide a trusted public HLS manifest for this active stream.");
+                var pendingFormat = LiveFormat(
+                    new Uri(YouTubeOrigin, $"watch?v={Uri.EscapeDataString(videoId.Value)}"),
+                    manifestPending: true,
+                    qualityLabel: "Active live · resolving manifest");
+                return Result<WatchPageData>.Success(new WatchPageData(
+                    LiveMetadata(
+                        root,
+                        details,
+                        videoId,
+                        title,
+                        liveStartedAtUtc,
+                        liveEndedAtUtc,
+                        VideoContentKind.LiveActive,
+                        pendingFormat),
+                    ParsePlayerScriptUrl(html),
+                    0,
+                    status,
+                    new ExtractionDiagnostics("LiveManifestClientFallback")));
             }
 
             return Result<WatchPageData>.Success(new WatchPageData(
@@ -305,18 +356,22 @@ public static class YouTubeWatchPageParser
             Chapters = []
         };
 
-    private static StreamFormat LiveFormat(Uri uri, bool manifestPending) => new()
-    {
-        FormatId = LiveHlsFormatId,
-        Url = uri,
-        Container = MediaContainer.Mkv,
-        Kind = StreamKind.Progressive,
-        VideoCodec = VideoCodec.Unknown,
-        AudioCodec = AudioCodec.Unknown,
-        QualityLabel = manifestPending ? "Upcoming live · wait and record" : "Active live · record from now",
-        IsLiveHls = true,
-        IsLiveManifestPending = manifestPending
-    };
+    private static StreamFormat LiveFormat(
+        Uri uri,
+        bool manifestPending,
+        string? qualityLabel = null) => new()
+        {
+            FormatId = LiveHlsFormatId,
+            Url = uri,
+            Container = MediaContainer.Mkv,
+            Kind = StreamKind.Progressive,
+            VideoCodec = VideoCodec.Unknown,
+            AudioCodec = AudioCodec.Unknown,
+            QualityLabel = qualityLabel ??
+                       (manifestPending ? "Upcoming live · wait and record" : "Active live · record from now"),
+            IsLiveHls = true,
+            IsLiveManifestPending = manifestPending
+        };
 
     private static bool TryParseHlsManifest(JsonElement root, out Uri uri)
     {

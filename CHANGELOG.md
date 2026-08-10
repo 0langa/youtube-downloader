@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 2.2.5 - 2026-08-10
+
+- Resolve active public live HLS manifests through bounded direct-client fallback and accept DVR playlists up to 8 MiB while retaining segment, line, URI, encryption, host, and structure limits.
+- Preserve trim, caption, chapter, split, and SponsorBlock selections while rebuilding compatible advanced-format filters.
+- Rebase embedded captions across explicit SponsorBlock removal and correctly bound trim-plus-removal transcodes to the selected source interval.
+- Read current description chapters from bounded `ytInitialData` payloads and keep later lossless chapter splits aligned to their source start times.
+- Write embedded subtitle language metadata as ISO-639 three-letter codes supported by MP4, MKV, and WebM muxers.
+- Refresh collection/archive commands after analysis, render saved archive names cleanly, and apply a selected output extension only once in filenames.
+
 ## 2.2.4 - 2026-08-02
 
 - Treat a narrowly validated context-only YouTube continuation response as the terminal page of a public collection instead of failing after already parsing its video items.

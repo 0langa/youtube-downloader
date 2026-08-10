@@ -13,6 +13,31 @@ namespace TubeForge.Tests.App;
 public static class MainViewModelSelectionTests
 {
     [Test]
+    public static void GeneralCommandRefreshInvalidatesCollectionArchiveActions()
+    {
+        using var viewModel = new MainViewModel();
+        var selectMissingInvalidations = 0;
+        var saveArchiveInvalidations = 0;
+        var checkArchivesInvalidations = 0;
+        var removeArchiveInvalidations = 0;
+        viewModel.SelectMissingCollectionCommand.CanExecuteChanged += (_, _) => selectMissingInvalidations++;
+        viewModel.SaveArchiveProfileCommand.CanExecuteChanged += (_, _) => saveArchiveInvalidations++;
+        viewModel.CheckArchiveProfilesCommand.CanExecuteChanged += (_, _) => checkArchivesInvalidations++;
+        viewModel.RemoveArchiveProfileCommand.CanExecuteChanged += (_, _) => removeArchiveInvalidations++;
+        var refresh = typeof(MainViewModel).GetMethod(
+            "RefreshCommands",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "RefreshCommands");
+
+        _ = refresh.Invoke(viewModel, null);
+
+        Assert.Equal(1, selectMissingInvalidations);
+        Assert.Equal(1, saveArchiveInvalidations);
+        Assert.Equal(1, checkArchivesInvalidations);
+        Assert.Equal(1, removeArchiveInvalidations);
+    }
+
+    [Test]
     public static void EveryDependentFilterAndProcessingCombinationKeepsAValidExactOutput()
     {
         using var viewModel = new MainViewModel();
@@ -167,6 +192,36 @@ public static class MainViewModelSelectionTests
     }
 
     [Test]
+    public static void VideoFilenameAppliesOutputExtensionOnceBeforeQualitySuffix()
+    {
+        using var viewModel = new MainViewModel
+        {
+            FileNameTemplateText = "{title}.MP4",
+            IncludeQualityInFileName = true
+        };
+        Assert.True(YouTubeVideoId.TryCreate("Fixture123_", out var videoId));
+        var metadata = new VideoMetadata { Id = videoId, Title = "Fixture", Formats = [] };
+        var selection = new FormatItemViewModel(Progressive(18, 1080, 30));
+        var render = typeof(MainViewModel).GetMethod(
+            "RenderFileName",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "RenderFileName");
+
+        var withQuality = (Result<string>)render.Invoke(
+            viewModel,
+            [metadata, selection, null, 2, OutputProfile.H264AacMp4])!;
+        Assert.True(withQuality.IsSuccess);
+        Assert.Equal("Fixture 1080p", withQuality.Value);
+
+        viewModel.IncludeQualityInFileName = false;
+        var withoutQuality = (Result<string>)render.Invoke(
+            viewModel,
+            [metadata, selection, null, 2, OutputProfile.H264AacMp4])!;
+        Assert.True(withoutQuality.IsSuccess);
+        Assert.Equal("Fixture", withoutQuality.Value);
+    }
+
+    [Test]
     public static void QuickPresetsApplyTruthfulStateAndManualChangesBecomeCustom()
     {
         using var viewModel = new MainViewModel();
@@ -225,7 +280,12 @@ public static class MainViewModelSelectionTests
             Id = videoId,
             Title = "Fixture",
             Duration = TimeSpan.FromMinutes(2),
-            Formats = BuildCompleteCatalog()
+            Formats = BuildCompleteCatalog(),
+            Chapters =
+            [
+                new VideoChapter { Title = "Intro", StartTime = TimeSpan.Zero },
+                new VideoChapter { Title = "Main", StartTime = TimeSpan.FromMinutes(1) }
+            ]
         });
         viewModel.EnableTrim = true;
 
@@ -237,6 +297,29 @@ public static class MainViewModelSelectionTests
             Assert.True(viewModel.CanTrim);
             Assert.True(viewModel.EnableTrim, preset.Label);
         }
+
+        viewModel.SelectedDownloadMode = viewModel.DownloadModes.First(option =>
+            option.Value == DownloadMode.AudioVideo);
+        var caption = new CaptionTrackOption(new CaptionTrack
+        {
+            Url = new Uri("https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en"),
+            LanguageCode = "en",
+            Name = "English"
+        });
+        SetCaptionTracks(viewModel, [caption]);
+        viewModel.SelectedCaptionTrack = caption;
+        viewModel.EmbedSelectedCaption = true;
+        viewModel.EmbedChapters = true;
+        viewModel.SplitChapters = true;
+        viewModel.SelectedContainer = viewModel.ContainerOptions.First(option =>
+            option.Value == MediaContainer.WebM);
+
+        Assert.True(viewModel.CanTrim);
+        Assert.True(viewModel.EnableTrim, "Advanced container filter");
+        Assert.True(viewModel.EmbedSelectedCaption, "Advanced container filter");
+        Assert.True(viewModel.EmbedChapters, "Advanced container filter");
+        Assert.True(viewModel.SplitChapters, "Advanced container filter");
+        Assert.True(viewModel.SelectedFormat is not null);
     }
 
     [Test]
@@ -453,7 +536,8 @@ public static class MainViewModelSelectionTests
             Id = videoId,
             Title = "Fixture",
             Duration = TimeSpan.FromMinutes(2),
-            Formats = BuildCompleteCatalog()
+            Formats = BuildCompleteCatalog(),
+            Chapters = [new VideoChapter { Title = "Start", StartTime = TimeSpan.Zero }]
         });
         viewModel.EnableSponsorBlock = true;
         viewModel.SelectedSponsorBlockMode = viewModel.SponsorBlockModeOptions.First(option =>
@@ -467,6 +551,28 @@ public static class MainViewModelSelectionTests
         Assert.True(converted.Success);
         Assert.Equal(SponsorBlockMode.Remove, converted.Selection?.Mode);
         Assert.Equal(SponsorBlockCategories.Sponsor, converted.Selection?.Categories);
+
+        var caption = new CaptionTrackOption(new CaptionTrack
+        {
+            Url = new Uri("https://www.youtube.com/api/timedtext?v=Fixture123_&lang=en"),
+            LanguageCode = "en",
+            Name = "English"
+        })
+        {
+            IsSelectedForEmbedding = true
+        };
+        SetCaptionTracks(viewModel, [caption]);
+        viewModel.SelectedCaptionTrack = caption;
+
+        var captioned = InvokeSponsorBlockSelection(viewModel, OutputProfile.H264AacMp4);
+        Assert.True(captioned.Success);
+        Assert.True(viewModel.SponsorBlockModeNotice.Contains("captions are rebased", StringComparison.OrdinalIgnoreCase));
+
+        viewModel.EmbedChapters = true;
+        Assert.True(viewModel.EmbedChapters);
+        var chaptered = InvokeSponsorBlockSelection(viewModel, OutputProfile.H264AacMp4);
+        Assert.False(chaptered.Success);
+        Assert.Equal("SponsorBlock.IncompatibleTimelineMetadata", chaptered.Error?.Code);
     }
 
     [Test]
@@ -620,6 +726,15 @@ public static class MainViewModelSelectionTests
         refresh.Invoke(viewModel, null);
         viewModel.SelectedDownloadMode = viewModel.DownloadModes[1];
         viewModel.SelectedDownloadMode = viewModel.DownloadModes[0];
+    }
+
+    private static void SetCaptionTracks(
+        MainViewModel viewModel,
+        IReadOnlyList<CaptionTrackOption> tracks)
+    {
+        var property = typeof(MainViewModel).GetProperty(nameof(MainViewModel.CaptionTracks))
+            ?? throw new MissingMemberException(typeof(MainViewModel).FullName, nameof(MainViewModel.CaptionTracks));
+        property.GetSetMethod(nonPublic: true)!.Invoke(viewModel, [tracks]);
     }
 
     private static void SetMetadata(MainViewModel viewModel, VideoMetadata metadata)

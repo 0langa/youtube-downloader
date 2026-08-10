@@ -180,7 +180,7 @@ public static class FfmpegMediaProcessorTests
             Assert.True(ContainsAdjacent(runner.Arguments, "-map", "0:a?"));
             Assert.True(ContainsAdjacent(runner.Arguments, "-map", "1:0"));
             Assert.True(ContainsAdjacent(runner.Arguments, "-c:s", testCase.Item3));
-            Assert.True(ContainsAdjacent(runner.Arguments, "-metadata:s:s:0", "language=en-US"));
+            Assert.True(ContainsAdjacent(runner.Arguments, "-metadata:s:s:0", "language=eng"));
             Assert.Equal(0, Directory.GetFiles(directory.Path, "*.processing.*").Length);
         }
     }
@@ -228,8 +228,8 @@ public static class FfmpegMediaProcessorTests
         Assert.True(result.IsSuccess, result.Error?.Message);
         Assert.True(ContainsAdjacent(runner.Arguments, "-map", "1:0"));
         Assert.True(ContainsAdjacent(runner.Arguments, "-map", "2:0"));
-        Assert.True(ContainsAdjacent(runner.Arguments, "-metadata:s:s:0", "language=en"));
-        Assert.True(ContainsAdjacent(runner.Arguments, "-metadata:s:s:1", "language=de"));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-metadata:s:s:0", "language=eng"));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-metadata:s:s:1", "language=deu"));
     }
 
     [Test]
@@ -265,6 +265,7 @@ public static class FfmpegMediaProcessorTests
         Assert.True(ContainsAdjacent(runner.Arguments, "-map_chapters", "2"));
         Assert.True(ContainsAdjacent(runner.Arguments, "-map_metadata", "2"));
         Assert.True(ContainsAdjacent(runner.Arguments, "-c:s", "mov_text"));
+        Assert.True(ContainsAdjacent(runner.Arguments, "-metadata:s:s:0", "language=eng"));
         Assert.True(runner.ChapterMetadata.Contains("title=Intro \\#1", StringComparison.Ordinal));
         Assert.True(runner.ChapterMetadata.Contains("title=Main \\= topic", StringComparison.Ordinal));
         Assert.Equal(0, Directory.GetFiles(directory.Path, "*.ffmetadata").Length);

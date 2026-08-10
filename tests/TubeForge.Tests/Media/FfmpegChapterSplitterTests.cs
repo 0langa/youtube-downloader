@@ -30,7 +30,7 @@ public static class FfmpegChapterSplitterTests
         foreach (var arguments in runner.Calls)
         {
             Assert.True(ContainsAdjacent(arguments, "-c", "copy"));
-            Assert.True(ContainsAdjacent(arguments, "-avoid_negative_ts", "make_zero"));
+            Assert.False(arguments.Contains("-avoid_negative_ts"));
             Assert.True(ContainsAdjacent(arguments, "-movflags", "+faststart"));
         }
 
@@ -49,6 +49,41 @@ public static class FfmpegChapterSplitterTests
             request with { AllowExistingValidatedOutput = true });
         Assert.False(rejected.IsSuccess);
         Assert.Equal("Media.ChapterSplitValidationFailed", rejected.Error?.Code);
+    }
+
+    [Test]
+    public static async Task UsesRelativeChapterLengthsWithoutRebasingInputSeekTimestamps()
+    {
+        using var directory = new MediaTestDirectory();
+        var executable = Path.Combine(directory.Path, "ffmpeg.exe");
+        var source = Path.Combine(directory.Path, "source.mp4");
+        var outputDirectory = Path.Combine(directory.Path, "Fixture - chapters");
+        await File.WriteAllBytesAsync(executable, []);
+        await File.WriteAllBytesAsync(source, SyntheticMp4.Track(
+            "vide", "VIDEO"u8, 1, 90_000, 90_000));
+        var runner = new CopyingRunner(source);
+        var request = Request(source, outputDirectory) with
+        {
+            Chapters =
+            [
+                new VideoChapter { Title = "Intro", StartTime = TimeSpan.Zero },
+                new VideoChapter { Title = "Selecting half", StartTime = TimeSpan.FromSeconds(19) },
+                new VideoChapter { Title = "X-Ray", StartTime = TimeSpan.FromSeconds(75) }
+            ],
+            Duration = TimeSpan.FromSeconds(100)
+        };
+
+        var result = await new FfmpegChapterSplitter(executable, runner).SplitAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(3, runner.Calls.Count);
+        Assert.True(ContainsAdjacent(runner.Calls[0], "-ss", "0"));
+        Assert.True(ContainsAdjacent(runner.Calls[0], "-t", "19"));
+        Assert.True(ContainsAdjacent(runner.Calls[1], "-ss", "19"));
+        Assert.True(ContainsAdjacent(runner.Calls[1], "-t", "56"));
+        Assert.True(ContainsAdjacent(runner.Calls[2], "-ss", "75"));
+        Assert.True(ContainsAdjacent(runner.Calls[2], "-t", "25"));
+        Assert.False(runner.Calls.SelectMany(arguments => arguments).Contains("-avoid_negative_ts"));
     }
 
     [Test]
