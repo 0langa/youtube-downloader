@@ -74,7 +74,7 @@ foreach ($line in $checksumLines) {
         throw "Release artifact is missing: $($Matches.Name)"
     }
     $actual = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash
-    if ($actual -cne $Matches.Hash) {
+    if ($actual -cne $Matches.Hash.ToUpperInvariant()) {
         throw "Checksum mismatch: $($Matches.Name)"
     }
 }
