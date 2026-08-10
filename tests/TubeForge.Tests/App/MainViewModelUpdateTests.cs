@@ -162,6 +162,95 @@ public static class MainViewModelUpdateTests
         }
     }
 
+    [Test]
+    public static async Task StreamedUpdateKeepsWholeOperationProgressVisibleAndFailsClosed()
+    {
+        var applicationDataDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"tubeforge-streamed-update-{Guid.NewGuid():N}");
+        var handler = new StreamingMismatchHandler();
+        try
+        {
+            var settings = new TubeForgeSettings
+            {
+                DownloadFolder = Path.GetFullPath(applicationDataDirectory),
+                EnableAutomaticUpdateChecks = true,
+                ResponsibleUseAccepted = true
+            };
+            var save = await new TubeForgeSettingsStore(
+                    Path.Combine(applicationDataDirectory, "settings.json"))
+                .SaveAsync(settings);
+            Assert.True(save.IsSuccess, save.Error?.Message);
+
+            var constructor = typeof(MainViewModel).GetConstructor(
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                [typeof(string), typeof(HttpMessageHandler), typeof(Version)],
+                modifiers: null)
+                ?? throw new MissingMethodException(
+                    typeof(MainViewModel).FullName,
+                    ".ctor(string, HttpMessageHandler, Version)");
+            using var viewModel = (MainViewModel)(constructor.Invoke(
+                [applicationDataDirectory, handler, new Version(2, 2, 1)])
+                ?? throw new InvalidOperationException("Update test view model was not created."));
+            await viewModel.InitializeAsync();
+
+            var update = typeof(MainViewModel).GetMethod(
+                "UpdateNowAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "UpdateNowAsync");
+            var updateTask = (Task)(update.Invoke(viewModel, null)
+                ?? throw new InvalidOperationException("Update operation was not started."));
+
+            await handler.SetupDownloadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await WaitUntilAsync(
+                () => viewModel.UpdateDownloadFraction >= 0.13,
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(viewModel.IsUpdateInProgress);
+            Assert.True(viewModel.IsDownloadingUpdate);
+            Assert.False(viewModel.CanDismissUpdatePrompt);
+            Assert.Equal("Updating…", viewModel.UpdateActionLabel);
+            Assert.Equal("Download + release checks", viewModel.UpdateProgressStage);
+            Assert.True(viewModel.UpdateDownloadFraction is >= 0.13 and < 0.80);
+            Assert.False(viewModel.UpdateProgressPercent == "0%");
+
+            handler.ContinueDownload.TrySetResult();
+            await updateTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.False(viewModel.IsUpdateInProgress);
+            Assert.False(viewModel.IsDownloadingUpdate);
+            Assert.True(viewModel.HasUpdateError);
+            Assert.Equal("Update stopped safely", viewModel.UpdateProgressStage);
+            Assert.True(viewModel.UpdateStatus.Contains("Update.DigestMismatch", StringComparison.Ordinal));
+            Assert.True(viewModel.CanDismissUpdatePrompt);
+            var updateDirectory = Path.Combine(applicationDataDirectory, "updates");
+            Assert.False(Directory.Exists(updateDirectory) && Directory.EnumerateFiles(updateDirectory).Any());
+        }
+        finally
+        {
+            handler.ContinueDownload.TrySetResult();
+            if (Directory.Exists(applicationDataDirectory))
+            {
+                Directory.Delete(applicationDataDirectory, recursive: true);
+            }
+        }
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (!predicate())
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new TimeoutException("Timed out waiting for update progress.");
+            }
+
+            await Task.Delay(10);
+        }
+    }
+
     private static void SetPrivateProperty(MainViewModel viewModel, string name, object value)
     {
         var property = typeof(MainViewModel).GetProperty(name)
@@ -219,6 +308,112 @@ public static class MainViewModelUpdateTests
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             });
+        }
+    }
+
+    private sealed class StreamingMismatchHandler : HttpMessageHandler
+    {
+        private const string SetupName = "TubeForge-2.2.2-win-x64-setup.exe";
+        private const string AdvertisedSetupHash =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        private readonly byte[] _setupBytes = Enumerable.Range(0, 1024 * 1024)
+            .Select(index => (byte)(index * 29))
+            .ToArray();
+        private readonly byte[] _checksumBytes;
+        private readonly string _releaseJson;
+
+        public StreamingMismatchHandler()
+        {
+            _checksumBytes = Encoding.UTF8.GetBytes($"{AdvertisedSetupHash}  {SetupName}\n");
+            var checksumHash = Convert.ToHexString(SHA256.HashData(_checksumBytes)).ToLowerInvariant();
+            _releaseJson = JsonSerializer.Serialize(new
+            {
+                tag_name = "v2.2.2",
+                html_url = "https://github.com/0langa/TubeForge/releases/tag/v2.2.2",
+                draft = false,
+                prerelease = false,
+                assets = new object[]
+                {
+                    new
+                    {
+                        name = SetupName,
+                        size = _setupBytes.LongLength,
+                        digest = "sha256:" + AdvertisedSetupHash,
+                        browser_download_url = $"https://github.com/0langa/TubeForge/releases/download/v2.2.2/{SetupName}"
+                    },
+                    new
+                    {
+                        name = "SHA256SUMS.txt",
+                        size = _checksumBytes.LongLength,
+                        digest = "sha256:" + checksumHash,
+                        browser_download_url = "https://github.com/0langa/TubeForge/releases/download/v2.2.2/SHA256SUMS.txt"
+                    }
+                }
+            });
+        }
+
+        public TaskCompletionSource SetupDownloadStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ContinueDownload { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var uri = request.RequestUri;
+            if (uri?.Host == "api.github.com")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(_releaseJson, Encoding.UTF8, "application/json")
+                });
+            }
+
+            if (uri?.AbsolutePath.EndsWith("/SHA256SUMS.txt", StringComparison.Ordinal) == true)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(_checksumBytes)
+                });
+            }
+
+            if (uri?.AbsolutePath.EndsWith('/' + SetupName, StringComparison.Ordinal) == true)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new GatedContent(
+                        _setupBytes,
+                        SetupDownloadStarted,
+                        ContinueDownload)
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class GatedContent(
+        byte[] bytes,
+        TaskCompletionSource started,
+        TaskCompletionSource continueDownload) : HttpContent
+    {
+        protected override async Task SerializeToStreamAsync(
+            Stream stream,
+            TransportContext? context)
+        {
+            const int chunkSize = 64 * 1024;
+            await stream.WriteAsync(bytes.AsMemory(0, chunkSize));
+            started.TrySetResult();
+            await continueDownload.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await stream.WriteAsync(bytes.AsMemory(chunkSize));
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = bytes.LongLength;
+            return true;
         }
     }
 }
