@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.2.7 - 2026-08-10
+
+- Add a deterministic streamed-installer regression proving non-zero visible progress, locked dismissal, fail-closed digest handling, and cleanup while a download is in flight.
+- Publish the v2.2.6 updater production behavior at a new stable version so installed v2.2.6 builds can exercise its prompt, progress, verified installer handoff, and relaunch end to end.
+- Keep media extraction, download, and processing behavior unchanged from v2.2.6.
+
 ## 2.2.6 - 2026-08-10
 
 - Render the update prompt and native title bar with the same dark TubeForge palette as the main window.

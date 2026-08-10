@@ -1,14 +1,15 @@
-# TubeForge v2.2.6
+# TubeForge v2.2.7
 
-TubeForge v2.2.6 makes the in-app update flow readable, informative, and truthful from prompt through installer launch. The update window now matches the main app, identifies the exact version transition and download size, and keeps visible progress through the final safety check.
+TubeForge v2.2.7 is a focused validation release for the updater shipped in v2.2.6. Production updater and media behavior is unchanged from v2.2.6; the new stable version lets an installed v2.2.6 build exercise the complete dark update prompt, streamed progress, verified installer handoff, and automatic relaunch against an official release.
 
 > [!IMPORTANT]
-> TubeForge v2.1.0 can detect a newer release, but its installed binary cannot enable the update button and does not contain the startup prompt. It cannot repair itself. If you are running v2.1.0, download and run `TubeForge-2.2.6-win-x64-setup.exe` once from the official release. Updates after that can use the in-app flow.
+> TubeForge v2.1.0 can detect a newer release, but its installed binary cannot enable the update button and does not contain the startup prompt. It cannot repair itself. If you are running v2.1.0, download and run `TubeForge-2.2.7-win-x64-setup.exe` once from the official release. Updates after that can use the in-app flow.
 
 Choose the per-user Windows x64 installer for normal use or a portable archive when needed. Verify `SHA256SUMS.txt` before running or extracting an asset. GitHub Actions release artifacts carry build-provenance attestations; the release manifest states whether Windows executables also have an Authenticode signature.
 
 Highlights:
 
+- add a deterministic streamed-download regression that holds the installer after its first chunk and proves non-zero visible progress, locked dismissal, fail-closed digest handling, and cleanup;
 - render the complete update prompt and native title bar with TubeForge's dark palette;
 - show current and target versions plus official installer size before any download;
 - explain the Download, Verify, and Install + relaunch stages up front;
@@ -18,7 +19,7 @@ Highlights:
 - expose the same phase, percentage, progress bar, and dynamic action label in Settings;
 - retain the verified official-repository, asset-policy, dual-digest, quiet per-user install, and automatic relaunch boundaries from earlier releases.
 
-Verification before publication covered a fresh Release build with zero warnings or errors, 265 deterministic tests, a core performance p95 of 0.176 ms against a 25 ms budget, both archive dependency/layout and launch gates, installer checksum and embedded-payload verification, and live rendering of the patched prompt at 150% Windows scaling. Published artifacts are rebuilt from the immutable release tag by GitHub Actions.
+Verification before publication covered 266 deterministic tests, including the streamed-progress failure path, plus the existing Release build, core performance, archive dependency/layout, launch, installer checksum, and embedded-payload gates. Published artifacts are rebuilt from the immutable release tag by GitHub Actions.
 
 Security and support boundaries:
 
