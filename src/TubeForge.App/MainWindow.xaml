@@ -1351,17 +1351,29 @@
                             </StackPanel>
                         </CheckBox>
 
-                        <ProgressBar Height="5" Margin="0,16,0,0" Maximum="1"
-                                     Value="{Binding UpdateDownloadFraction, Mode=OneWay}"
-                                     Visibility="{Binding IsDownloadingUpdate, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <Grid Margin="0,16,0,0"
+                              Visibility="{Binding IsUpdateInProgress, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="{Binding UpdateProgressStage}" FontSize="11" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding UpdateProgressPercent}" HorizontalAlignment="Right"
+                                       FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                            <ProgressBar Grid.Row="1" Style="{StaticResource UpdateProgressBar}"
+                                         Margin="0,7,0,0" Maximum="1"
+                                         Value="{Binding UpdateDownloadFraction, Mode=OneWay}"
+                                         AutomationProperties.Name="TubeForge update progress" />
+                        </Grid>
                         <TextBlock Text="{Binding UpdateStatus}" Margin="0,14,0,0" TextWrapping="Wrap"
-                                   Foreground="{StaticResource MutedTextBrush}" />
+                                   Style="{StaticResource UpdateStatusText}"
+                                   AutomationProperties.LiveSetting="Polite" />
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
                             <Button Style="{StaticResource SecondaryButton}" Content="Check now"
                                     Command="{Binding CheckForUpdatesCommand}" Padding="14,9" />
-                            <Button Style="{StaticResource PrimaryButton}" Content="Update now" Margin="10,0,0,0"
+                            <Button Style="{StaticResource PrimaryButton}" Content="{Binding UpdateActionLabel}" Margin="10,0,0,0"
                                     Command="{Binding UpdateNowCommand}" Padding="14,9"
-                                    AutomationProperties.Name="Download, install, and restart TubeForge"
+                                    AutomationProperties.Name="Download, verify, install, and restart TubeForge"
                                     Visibility="{Binding IsUpdateActionAvailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </StackPanel>
                     </StackPanel>

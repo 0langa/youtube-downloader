@@ -101,6 +101,47 @@ public static class GitHubUpdateClientTests
         }
     }
 
+    [Test]
+    public static async Task CachedInstallerVerificationReportsMonotonicProgress()
+    {
+        var fixture = ReleaseFixture.Create();
+        using var client = new HttpClient(new ReleaseHandler(fixture))
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        var updates = new GitHubUpdateClient(client);
+        var release = GitHubReleasePolicy.ParseLatest(fixture.Json, new Version(1, 0, 0)).Value!;
+        var directory = Path.Combine(Path.GetTempPath(), $"tubeforge-update-cache-{Guid.NewGuid():N}");
+        try
+        {
+            var first = await updates.DownloadInstallerAsync(release, directory);
+            Assert.True(first.IsSuccess, first.Error?.Message);
+
+            var progress = new CapturingProgress();
+            var cached = await updates.DownloadInstallerAsync(release, directory, progress);
+
+            Assert.True(cached.IsSuccess, cached.Error?.Message);
+            Assert.True(progress.Values.Count > 3);
+            Assert.Equal(0d, progress.Values[0]);
+            Assert.Equal(1d, progress.Values[^1]);
+            Assert.True(progress.Values.Zip(progress.Values.Skip(1), (left, right) => right >= left).All(value => value));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    private sealed class CapturingProgress : IProgress<double>
+    {
+        public List<double> Values { get; } = [];
+
+        public void Report(double value) => Values.Add(value);
+    }
+
     private sealed record ReleaseFixture(
         string Json,
         string SetupName,

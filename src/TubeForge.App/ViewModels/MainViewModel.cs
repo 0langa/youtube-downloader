@@ -222,7 +222,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _updateStatus = "TubeForge can check GitHub for verified stable releases.";
     private bool _isCheckingForUpdate;
     private bool _isDownloadingUpdate;
+    private bool _isUpdateInProgress;
     private double _updateDownloadFraction;
+    private string _updateProgressStage = "Ready";
+    private bool _hasUpdateError;
     private UpdateRelease? _availableUpdate;
     private UpdateDownloadReceipt? _readyUpdate;
     private string _diagnosticsStatus = "Export contains whitelisted technical state only.";
@@ -377,10 +380,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         AcceptResponsibleUseCommand = new AsyncRelayCommand(AcceptResponsibleUseAsync);
         CheckForUpdatesCommand = new AsyncRelayCommand(
             () => CheckForUpdatesAsync(isAutomatic: false),
-            () => !ShowResponsibleUseNotice && !IsCheckingForUpdate && !IsDownloadingUpdate);
+            () => !ShowResponsibleUseNotice && !IsCheckingForUpdate && !IsUpdateInProgress);
         UpdateNowCommand = new AsyncRelayCommand(
             UpdateNowAsync,
-            () => _availableUpdate is not null && !IsCheckingForUpdate && !IsDownloadingUpdate);
+            () => _availableUpdate is not null && !IsCheckingForUpdate && !IsUpdateInProgress);
         ClearCompletedCommand = new AsyncRelayCommand(ClearCompletedAsync, () => QueueItems.Any(item => item.Status == DownloadQueueStatus.Completed));
         ClearHistoryCommand = new AsyncRelayCommand(
             ClearHistoryAsync,
@@ -754,10 +757,43 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    public bool IsUpdateInProgress
+    {
+        get => _isUpdateInProgress;
+        private set
+        {
+            if (Set(ref _isUpdateInProgress, value))
+            {
+                OnPropertyChanged(nameof(CanDismissUpdatePrompt));
+                OnPropertyChanged(nameof(UpdateActionLabel));
+                RefreshCommands();
+            }
+        }
+    }
+
     public double UpdateDownloadFraction
     {
         get => _updateDownloadFraction;
-        private set => Set(ref _updateDownloadFraction, value);
+        private set
+        {
+            var clamped = double.IsFinite(value) ? Math.Clamp(value, 0, 1) : 0;
+            if (Set(ref _updateDownloadFraction, clamped))
+            {
+                OnPropertyChanged(nameof(UpdateProgressPercent));
+            }
+        }
+    }
+
+    public string UpdateProgressStage
+    {
+        get => _updateProgressStage;
+        private set => Set(ref _updateProgressStage, value);
+    }
+
+    public bool HasUpdateError
+    {
+        get => _hasUpdateError;
+        private set => Set(ref _hasUpdateError, value);
     }
 
     public bool HasUpdateAvailable => _availableUpdate is not null && _readyUpdate is null;
@@ -766,9 +802,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public bool IsUpdateActionAvailable => _availableUpdate is not null;
 
-    public bool CanDismissUpdatePrompt => !IsDownloadingUpdate;
+    public bool CanDismissUpdatePrompt => !IsUpdateInProgress;
+
+    public string UpdateActionLabel => IsUpdateInProgress ? "Updating…" : "Update now";
+
+    public string UpdateProgressPercent => $"{Math.Round(UpdateDownloadFraction * 100):0}%";
 
     public string AvailableUpdateVersion => _availableUpdate?.Version.ToString(3) ?? string.Empty;
+
+    public string AvailableUpdateSummary => _availableUpdate is null
+        ? string.Empty
+        : $"TubeForge {_currentVersion.ToString(3)}  →  {_availableUpdate.Version.ToString(3)}  ·  " +
+          $"{FormatBytes(_availableUpdate.SetupLength)} installer";
 
     public string DiagnosticsStatus
     {
@@ -2621,12 +2666,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var ready = _readyUpdate;
         if (ready is null)
         {
+            HasUpdateError = true;
+            UpdateProgressStage = "Update stopped safely";
             UpdateStatus = "Download and verify an update before installing it.";
             return false;
         }
 
         try
         {
+            SetUpdateProgress(0.82, "Final safety check");
+            UpdateStatus = $"Rechecking TubeForge {ready.Version.ToString(3)} before it can run…";
             var installerPath = Path.GetFullPath(ready.InstallerPath);
             var expectedDirectory = Path.GetFullPath(_updateDirectory);
             if (!string.Equals(
@@ -2643,27 +2692,26 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 throw new IOException("Update installer size changed after verification.");
             }
 
-            await using var stream = new FileStream(
-                installerPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                128 * 1024,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream)).ToLowerInvariant();
+            var hashProgress = new Progress<double>(value =>
+                SetUpdateProgress(0.82 + (value * 0.16), "Final safety check"));
+            var hash = await ComputeFileSha256Async(installerPath, ready.BytesWritten, hashProgress);
             if (!hash.Equals(ready.Sha256, StringComparison.OrdinalIgnoreCase))
             {
                 throw new IOException("Update installer hash changed after verification.");
             }
 
+            SetUpdateProgress(0.99, "Starting installer");
             var start = CreateUpdateInstallerStartInfo(installerPath, Environment.ProcessId);
             _ = Process.Start(start) ?? throw new IOException("The verified update installer did not start.");
-            UpdateStatus = $"Installing TubeForge {ready.Version.ToString(3)}…";
+            SetUpdateProgress(1, "Installer started");
+            UpdateStatus = $"TubeForge {ready.Version.ToString(3)} verified. Closing this version to install and relaunch…";
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                           InvalidOperationException or Win32Exception)
         {
+            HasUpdateError = true;
+            UpdateProgressStage = "Update stopped safely";
             UpdateStatus = $"Update install failed safely ({exception.GetType().Name}).";
             return false;
         }
@@ -2672,13 +2720,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private async Task CheckForUpdatesAsync(bool isAutomatic)
     {
         UpdateRelease? detectedUpdate = null;
+        HasUpdateError = false;
         IsCheckingForUpdate = true;
+        UpdateProgressStage = "Checking for updates";
         UpdateStatus = "Checking GitHub for a verified stable release…";
         try
         {
             var result = await _updateClient.CheckForUpdateAsync(_currentVersion);
             if (!result.IsSuccess)
             {
+                HasUpdateError = true;
+                UpdateProgressStage = "Check unavailable";
                 UpdateStatus = isAutomatic
                     ? "Automatic update check unavailable; use Check now to retry."
                     : $"Update check failed safely ({result.Error!.Code}).";
@@ -2688,6 +2740,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _availableUpdate = result.Value;
             _readyUpdate = null;
             UpdateDownloadFraction = 0;
+            UpdateProgressStage = _availableUpdate is null ? "Up to date" : "Ready to update";
             UpdateStatus = _availableUpdate is null
                 ? $"TubeForge {_currentVersion.ToString(3)} is up to date."
                 : $"TubeForge {_availableUpdate.Version.ToString(3)} is available and ready to download.";
@@ -2707,14 +2760,31 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private async Task UpdateNowAsync()
     {
-        if (_readyUpdate is null && !await DownloadUpdateAsync())
+        var installerStarted = false;
+        HasUpdateError = false;
+        UpdateDownloadFraction = 0;
+        UpdateProgressStage = "Preparing update";
+        UpdateStatus = "Preparing secure update…";
+        IsUpdateInProgress = true;
+        try
         {
-            return;
-        }
+            if (_readyUpdate is null && !await DownloadUpdateAsync())
+            {
+                return;
+            }
 
-        if (await StartReadyUpdateAsync())
+            if (await StartReadyUpdateAsync())
+            {
+                installerStarted = true;
+                UpdateInstallerStarted?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        finally
         {
-            UpdateInstallerStarted?.Invoke(this, EventArgs.Empty);
+            if (!installerStarted)
+            {
+                IsUpdateInProgress = false;
+            }
         }
     }
 
@@ -2727,20 +2797,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         IsDownloadingUpdate = true;
-        UpdateDownloadFraction = 0;
-        UpdateStatus = $"Downloading and verifying TubeForge {release.Version.ToString(3)}…";
+        SetUpdateProgress(0.02, "Download + release checks");
+        UpdateStatus = $"Downloading and validating official TubeForge {release.Version.ToString(3)} installer…";
         try
         {
-            var progress = new Progress<double>(value => UpdateDownloadFraction = value);
+            var progress = new Progress<double>(value =>
+                SetUpdateProgress(0.02 + (Math.Clamp(value, 0, 1) * 0.78), "Download + release checks"));
             var result = await _updateClient.DownloadInstallerAsync(release, _updateDirectory, progress);
             if (!result.IsSuccess)
             {
+                HasUpdateError = true;
+                UpdateProgressStage = "Update stopped safely";
                 UpdateStatus = $"Update download rejected safely ({result.Error!.Code}).";
                 return false;
             }
 
             _readyUpdate = result.Value;
-            UpdateStatus = $"TubeForge {release.Version.ToString(3)} verified. Starting installer…";
+            SetUpdateProgress(0.82, "Installer downloaded and verified");
+            UpdateStatus = $"TubeForge {release.Version.ToString(3)} download verified.";
             NotifyUpdateProperties();
             return true;
         }
@@ -2756,7 +2830,68 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(IsUpdateReady));
         OnPropertyChanged(nameof(IsUpdateActionAvailable));
         OnPropertyChanged(nameof(AvailableUpdateVersion));
+        OnPropertyChanged(nameof(AvailableUpdateSummary));
         RefreshCommands();
+    }
+
+    private void SetUpdateProgress(double value, string stage)
+    {
+        var clamped = double.IsFinite(value) ? Math.Clamp(value, 0, 1) : 0;
+        if (clamped >= UpdateDownloadFraction)
+        {
+            UpdateDownloadFraction = clamped;
+        }
+
+        UpdateProgressStage = stage;
+    }
+
+    private static async Task<string> ComputeFileSha256Async(
+        string path,
+        long expectedLength,
+        IProgress<double>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            128 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        if (stream.Length != expectedLength)
+        {
+            throw new IOException("Update installer size changed before verification.");
+        }
+
+        progress?.Report(0);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[128 * 1024];
+        long total = 0;
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer, cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total = checked(total + read);
+            if (total > expectedLength)
+            {
+                throw new IOException("Update installer grew during verification.");
+            }
+
+            hash.AppendData(buffer.AsSpan(0, read));
+            progress?.Report(expectedLength == 0 ? 1 : (double)total / expectedLength);
+        }
+
+        if (total != expectedLength)
+        {
+            throw new IOException("Update installer size changed during verification.");
+        }
+
+        progress?.Report(1);
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
     internal static ProcessStartInfo CreateUpdateInstallerStartInfo(string installerPath, int waitProcessId)

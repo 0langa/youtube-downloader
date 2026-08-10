@@ -74,6 +74,7 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
         ArgumentNullException.ThrowIfNull(release);
         ArgumentException.ThrowIfNullOrWhiteSpace(updateDirectory);
         var temporary = string.Empty;
+        progress?.Report(0);
         try
         {
             var directory = Path.GetFullPath(updateDirectory);
@@ -103,11 +104,14 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
                     "The release API digest and checksum manifest disagree.");
             }
 
+            progress?.Report(0.05);
+
             if (File.Exists(destination) &&
                 await FileMatchesAsync(
                     destination,
                     release.SetupLength,
                     release.SetupSha256,
+                    value => progress?.Report(0.05 + (value * 0.10)),
                     cancellationToken).ConfigureAwait(false))
             {
                 progress?.Report(1);
@@ -118,6 +122,7 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
                     release.SetupSha256));
             }
 
+            progress?.Report(0.15);
             TryDelete(temporary);
             using var response = await SendAssetRequestAsync(
                 release.SetupDownloadUri,
@@ -162,7 +167,7 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
 
                 hash.AppendData(buffer.AsSpan(0, read));
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                progress?.Report((double)total / release.SetupLength);
+                progress?.Report(0.15 + (0.85 * total / release.SetupLength));
             }
 
             await output.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -315,6 +320,7 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
         string path,
         long expectedLength,
         string expectedSha256,
+        Action<double>? progress,
         CancellationToken cancellationToken)
     {
         var info = new FileInfo(path);
@@ -330,9 +336,36 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
             FileShare.Read,
             128 * 1024,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken))
-            .ToLowerInvariant();
-        return hash.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase);
+        progress?.Invoke(0);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[128 * 1024];
+        long total = 0;
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total = checked(total + read);
+            if (total > expectedLength)
+            {
+                return false;
+            }
+
+            hash.AppendData(buffer.AsSpan(0, read));
+            progress?.Invoke((double)total / expectedLength);
+        }
+
+        if (total != expectedLength)
+        {
+            return false;
+        }
+
+        progress?.Invoke(1);
+        var actual = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+        return actual.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string DirectChild(string directory, string fileName)

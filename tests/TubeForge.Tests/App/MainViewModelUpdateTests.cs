@@ -53,6 +53,12 @@ public static class MainViewModelUpdateTests
 
             Assert.Equal(new Version(2, 2, 2), version);
             Assert.Equal("2.2.2", viewModel.AvailableUpdateVersion);
+            Assert.True(viewModel.AvailableUpdateSummary.Contains("2.2.1", StringComparison.Ordinal));
+            Assert.True(viewModel.AvailableUpdateSummary.Contains("2.2.2", StringComparison.Ordinal));
+            Assert.True(viewModel.AvailableUpdateSummary.Contains("MB installer", StringComparison.Ordinal));
+            Assert.Equal("Ready to update", viewModel.UpdateProgressStage);
+            Assert.Equal("0%", viewModel.UpdateProgressPercent);
+            Assert.Equal("Update now", viewModel.UpdateActionLabel);
             Assert.True(viewModel.IsUpdateActionAvailable);
             Assert.True(viewModel.UpdateNowCommand.CanExecute(null));
         }
@@ -100,6 +106,74 @@ public static class MainViewModelUpdateTests
         Assert.SequenceEqual(
             new[] { "/update", "/quiet", "/wait-pid", "4321", "/launch" },
             start.ArgumentList);
+    }
+
+    [Test]
+    public static void WholeUpdateProgressLocksPromptAndReportsPercent()
+    {
+        using var viewModel = new MainViewModel();
+
+        SetPrivateProperty(viewModel, nameof(MainViewModel.IsUpdateInProgress), true);
+        SetPrivateProperty(viewModel, nameof(MainViewModel.UpdateDownloadFraction), 0.424);
+        SetPrivateProperty(viewModel, nameof(MainViewModel.UpdateProgressStage), "Final safety check");
+
+        Assert.False(viewModel.CanDismissUpdatePrompt);
+        Assert.Equal("Updating…", viewModel.UpdateActionLabel);
+        Assert.Equal("42%", viewModel.UpdateProgressPercent);
+        Assert.Equal("Final safety check", viewModel.UpdateProgressStage);
+
+        SetPrivateProperty(viewModel, nameof(MainViewModel.IsUpdateInProgress), false);
+        Assert.True(viewModel.CanDismissUpdatePrompt);
+        Assert.Equal("Update now", viewModel.UpdateActionLabel);
+    }
+
+    [Test]
+    public static async Task FinalInstallerVerificationReportsMonotonicProgress()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"tubeforge-update-hash-{Guid.NewGuid():N}.bin");
+        var bytes = Enumerable.Range(0, 1024 * 1024)
+            .Select(index => (byte)(index * 17))
+            .ToArray();
+        try
+        {
+            await File.WriteAllBytesAsync(path, bytes);
+            var progress = new CapturingProgress();
+            var method = typeof(MainViewModel).GetMethod(
+                "ComputeFileSha256Async",
+                BindingFlags.Static | BindingFlags.NonPublic)
+                ?? throw new MissingMethodException(typeof(MainViewModel).FullName, "ComputeFileSha256Async");
+            var task = (Task<string>)(method.Invoke(
+                null,
+                [path, bytes.LongLength, progress, CancellationToken.None])
+                ?? throw new InvalidOperationException("Update hash task was not created."));
+
+            var actual = await task;
+            var expected = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+            Assert.Equal(expected, actual);
+            Assert.True(progress.Values.Count > 3);
+            Assert.Equal(0d, progress.Values[0]);
+            Assert.Equal(1d, progress.Values[^1]);
+            Assert.True(progress.Values.Zip(progress.Values.Skip(1), (left, right) => right >= left).All(value => value));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static void SetPrivateProperty(MainViewModel viewModel, string name, object value)
+    {
+        var property = typeof(MainViewModel).GetProperty(name)
+            ?? throw new MissingMemberException(typeof(MainViewModel).FullName, name);
+        property.SetValue(viewModel, value);
+    }
+
+    private sealed class CapturingProgress : IProgress<double>
+    {
+        public List<double> Values { get; } = [];
+
+        public void Report(double value) => Values.Add(value);
     }
 
     private sealed class LatestReleaseHandler : HttpMessageHandler

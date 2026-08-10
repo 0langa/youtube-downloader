@@ -2,50 +2,130 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="TubeForge update available" Icon="Assets/TubeForge.ico"
-        Width="540" Height="390" ResizeMode="NoResize" ShowInTaskbar="False"
-        WindowStartupLocation="CenterOwner" UseLayoutRounding="True" SnapsToDevicePixels="True">
+        Width="600" Height="480" ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner" UseLayoutRounding="True" SnapsToDevicePixels="True"
+        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}">
+    <Window.Resources>
+        <Style x:Key="UpdateStepNumber" TargetType="Border">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Background" Value="#2A215A" />
+            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style x:Key="UpdateStepLabel" TargetType="TextBlock">
+            <Setter Property="Margin" Value="8,0,0,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Window.Resources>
+
     <Grid Margin="28">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="20" />
+            <RowDefinition Height="18" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="20" />
+            <RowDefinition Height="18" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <StackPanel Orientation="Horizontal">
-            <Image Source="Assets/TubeForge.png" Width="64" Height="64"
+            <Image Source="Assets/TubeForge.png" Width="68" Height="68"
                    AutomationProperties.Name="TubeForge" />
-            <StackPanel Margin="18,2,0,0">
-                <TextBlock Text="Update available" FontSize="24" FontWeight="Bold" />
-                <TextBlock x:Name="VersionText" Margin="0,6,0,0"
+            <StackPanel Margin="18,4,0,0" VerticalAlignment="Center">
+                <TextBlock Text="Update available" FontSize="25" FontWeight="Bold" />
+                <TextBlock x:Name="VersionText" Margin="0,5,0,0" FontSize="12"
                            Foreground="{StaticResource MutedTextBrush}" />
             </StackPanel>
         </StackPanel>
 
         <Border Grid.Row="2" Style="{StaticResource Card}">
             <StackPanel>
-                <TextBlock Text="Update TubeForge now?" FontSize="18" FontWeight="SemiBold" />
-                <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" LineHeight="20"
-                           Text="TubeForge will securely download and verify the official installer, close this version, install the update, then launch the new version." />
-                <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" FontSize="11"
+                <TextBlock Text="Ready when you are" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" LineHeight="19"
+                           Text="TubeForge downloads only the official GitHub release, matches both published SHA-256 records, then performs one final on-disk check before launch." />
+                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="11"
                            Foreground="{StaticResource MutedTextBrush}"
                            Text="Settings, queue, Library history, and downloaded media remain unchanged." />
-                <ProgressBar Height="6" Margin="0,18,0,0" Maximum="1"
-                             Value="{Binding UpdateDownloadFraction, Mode=OneWay}"
-                             Visibility="{Binding IsDownloadingUpdate, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                <Border Margin="0,16,0,0" Padding="12,10" CornerRadius="10"
+                        Background="#0C1322" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsUpdateInProgress}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal">
+                            <Border Style="{StaticResource UpdateStepNumber}">
+                                <TextBlock Text="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           FontWeight="Bold" />
+                            </Border>
+                            <TextBlock Text="Download" Style="{StaticResource UpdateStepLabel}" />
+                        </StackPanel>
+                        <Border Grid.Column="1" Height="1" Margin="12,0"
+                                VerticalAlignment="Center" Background="{StaticResource BorderBrush}" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                            <Border Style="{StaticResource UpdateStepNumber}">
+                                <TextBlock Text="2" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           FontWeight="Bold" />
+                            </Border>
+                            <TextBlock Text="Verify" Style="{StaticResource UpdateStepLabel}" />
+                        </StackPanel>
+                        <Border Grid.Column="3" Height="1" Margin="12,0"
+                                VerticalAlignment="Center" Background="{StaticResource BorderBrush}" />
+                        <StackPanel Grid.Column="4" Orientation="Horizontal">
+                            <Border Style="{StaticResource UpdateStepNumber}">
+                                <TextBlock Text="3" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           FontWeight="Bold" />
+                            </Border>
+                            <TextBlock Text="Install + relaunch" Style="{StaticResource UpdateStepLabel}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Grid Margin="0,16,0,0"
+                      Visibility="{Binding IsUpdateInProgress, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="{Binding UpdateProgressStage}" FontSize="11" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding UpdateProgressPercent}" HorizontalAlignment="Right"
+                               FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                    <ProgressBar Grid.Row="1" Style="{StaticResource UpdateProgressBar}"
+                                 Margin="0,7,0,0" Maximum="1"
+                                 Value="{Binding UpdateDownloadFraction, Mode=OneWay}"
+                                 AutomationProperties.Name="TubeForge update progress" />
+                </Grid>
+
                 <TextBlock Text="{Binding UpdateStatus}" Margin="0,12,0,0" TextWrapping="Wrap"
-                           Foreground="{StaticResource MutedTextBrush}" />
+                           FontSize="11" Style="{StaticResource UpdateStatusText}"
+                           AutomationProperties.LiveSetting="Polite" />
             </StackPanel>
         </Border>
 
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="LaterButton" Style="{StaticResource SecondaryButton}" Content="Later"
+            <Button x:Name="LaterButton" Style="{StaticResource SecondaryButton}" Content="Not now"
                     Click="LaterButton_OnClick" Padding="18,10" IsCancel="True"
                     IsEnabled="{Binding CanDismissUpdatePrompt}" />
-            <Button Style="{StaticResource PrimaryButton}" Content="Update now" Margin="10,0,0,0"
-                    Command="{Binding UpdateNowCommand}" Padding="18,10" IsDefault="True"
-                    AutomationProperties.Name="Download, install, and restart TubeForge" />
+            <Button Style="{StaticResource PrimaryButton}" Content="{Binding UpdateActionLabel}"
+                    Margin="10,0,0,0" Command="{Binding UpdateNowCommand}" Padding="18,10" IsDefault="True"
+                    AutomationProperties.Name="Download, verify, install, and restart TubeForge" />
         </StackPanel>
     </Grid>
 </Window>

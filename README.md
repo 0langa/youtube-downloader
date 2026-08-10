@@ -15,7 +15,7 @@ TubeForge is an ad-free Windows desktop app for public YouTube media you own or 
 
 **[Download latest stable release](https://github.com/0langa/TubeForge/releases/latest)**
 
-TubeForge v2.2.5 is the current stable release. For normal use, choose `TubeForge-2.2.5-win-x64-setup.exe`. It installs for the current Windows user without administrator access. Portable self-contained and framework-dependent ZIPs are also available.
+TubeForge v2.2.6 is the current stable release. For normal use, choose `TubeForge-2.2.6-win-x64-setup.exe`. It installs for the current Windows user without administrator access. Portable self-contained and framework-dependent ZIPs are also available.
 
 TubeForge v2.1.0 users must install the current release manually once: v2.1.0 can detect an update but cannot enable its update button and does not contain the startup prompt. Later installed releases support the verified in-app update flow.
 
@@ -54,7 +54,7 @@ Requirements: Windows 10 or 11, x64. Self-contained builds include the .NET runt
 - No ads, telemetry, accounts, hosted services, cookie import, or credential storage.
 - System, manual, or disabled proxy mode across metadata, collections, captions, thumbnails, media, SponsorBlock, and update checks; credential-bearing proxy URLs are rejected.
 - Redacted diagnostics export that excludes media URLs, IDs, titles, channels, local paths, headers, cookies, signatures, and visitor data.
-- Configurable automatic update checks. Explicit `Update now` downloads and verifies the official installer, closes TubeForge, installs per-user, and relaunches the updated version.
+- Configurable automatic update checks. Explicit `Update now` shows phase and percentage through download and final verification, then closes TubeForge, installs per-user, and relaunches the updated version.
 - Reproducible Windows x64 packages with SHA-256 manifests, GitHub build-provenance attestations, and optional Authenticode signatures.
 
 ## Not supported

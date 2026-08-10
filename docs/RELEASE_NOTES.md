@@ -1,26 +1,24 @@
-# TubeForge v2.2.5
+# TubeForge v2.2.6
 
-TubeForge v2.2.5 hardens live capture, timeline editing, chapter and caption workflows, advanced format selection, collection archives, and output naming. These fixes came from a full live desktop E2E pass against v2.2.4, followed by deterministic regressions and packaged-app verification.
+TubeForge v2.2.6 makes the in-app update flow readable, informative, and truthful from prompt through installer launch. The update window now matches the main app, identifies the exact version transition and download size, and keeps visible progress through the final safety check.
 
 > [!IMPORTANT]
-> TubeForge v2.1.0 can detect a newer release, but its installed binary cannot enable the update button and does not contain the startup prompt. It cannot repair itself. If you are running v2.1.0, download and run `TubeForge-2.2.5-win-x64-setup.exe` once from the official release. Updates after that can use the in-app flow.
+> TubeForge v2.1.0 can detect a newer release, but its installed binary cannot enable the update button and does not contain the startup prompt. It cannot repair itself. If you are running v2.1.0, download and run `TubeForge-2.2.6-win-x64-setup.exe` once from the official release. Updates after that can use the in-app flow.
 
 Choose the per-user Windows x64 installer for normal use or a portable archive when needed. Verify `SHA256SUMS.txt` before running or extracting an asset. GitHub Actions release artifacts carry build-provenance attestations; the release manifest states whether Windows executables also have an Authenticode signature.
 
 Highlights:
 
-- recover a trusted active-live HLS manifest through bounded direct-client fallback when the watch response omits it;
-- accept valid large DVR playlists up to 8 MiB while retaining independent segment, line, URI, encryption, host, and structure guards;
-- preserve trim, embedded-caption, chapter, split, and SponsorBlock selections during advanced-format filter changes;
-- support embedded captions with explicit SponsorBlock removal by clipping removed cues and rebasing the remaining timeline;
-- bound combined trim-and-removal transcodes to the selected source interval and normalize seek-relative audio/video timestamps before filtering;
-- read current description chapters from bounded assigned `ytInitialData` and keep later stream-copy chapter files aligned to their requested source starts;
-- normalize embedded subtitle language tags to supported ISO-639 three-letter codes such as `eng` and `deu`;
-- immediately refresh collection/archive actions after analysis and render saved archive profile names without raw record text;
-- strip one matching selected-output extension from filename templates before adding a quality suffix and publishing the final extension;
-- retain the strict public-playlist continuation handling introduced in v2.2.4.
+- render the complete update prompt and native title bar with TubeForge's dark palette;
+- show current and target versions plus official installer size before any download;
+- explain the Download, Verify, and Install + relaunch stages up front;
+- display a live phase and percentage across release checks, installer download, cached-installer validation, and the final on-disk SHA-256 recheck;
+- keep `Not now`, window dismissal, update checks, and duplicate update actions disabled throughout the complete operation;
+- surface safe update failures in an explicit error color and restore controls for retry;
+- expose the same phase, percentage, progress bar, and dynamic action label in Settings;
+- retain the verified official-repository, asset-policy, dual-digest, quiet per-user install, and automatic relaunch boundaries from earlier releases.
 
-Verification before publication covered a clean Release build, 262 deterministic tests, focused transfer/publication gates, archive and installer verification, and a self-contained packaged UI download whose H.264/AAC output passed full decode. Published artifacts are rebuilt from the immutable release tag by GitHub Actions.
+Verification before publication covered a fresh Release build with zero warnings or errors, 265 deterministic tests, a core performance p95 of 0.176 ms against a 25 ms budget, both archive dependency/layout and launch gates, installer checksum and embedded-payload verification, and live rendering of the patched prompt at 150% Windows scaling. Published artifacts are rebuilt from the immutable release tag by GitHub Actions.
 
 Security and support boundaries:
 

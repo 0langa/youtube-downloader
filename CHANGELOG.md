@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.2.6 - 2026-08-10
+
+- Render the update prompt and native title bar with the same dark TubeForge palette as the main window.
+- Show current and target versions, installer size, Download/Verify/Install stages, and a live phase plus percentage throughout the full update operation.
+- Report progress while validating cached installers and during the final pre-launch SHA-256 recheck instead of hiding progress after download.
+- Keep dismissal and duplicate update actions disabled until the complete update succeeds or fails safely, and render failures with an explicit error state.
+
 ## 2.2.5 - 2026-08-10
 
 - Resolve active public live HLS manifests through bounded direct-client fallback and accept DVR playlists up to 8 MiB while retaining segment, line, URI, encryption, host, and structure limits.

@@ -116,10 +116,22 @@ public static class AppXamlResourceTests
         var fixtureDirectory = Path.Combine(AppContext.BaseDirectory, "Fixtures");
         var updateWindowXaml = File.ReadAllText(Path.Combine(fixtureDirectory, "UpdateAvailableWindow.xaml"));
 
-        Assert.True(updateWindowXaml.Contains("Content=\"Update now\"", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains(
+            "Background=\"{StaticResource WindowBrush}\" Foreground=\"{StaticResource TextBrush}\"",
+            StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("Content=\"{Binding UpdateActionLabel}\"", StringComparison.Ordinal));
         Assert.True(updateWindowXaml.Contains("Command=\"{Binding UpdateNowCommand}\"", StringComparison.Ordinal));
         Assert.True(updateWindowXaml.Contains("Value=\"{Binding UpdateDownloadFraction, Mode=OneWay}\"", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("Text=\"{Binding UpdateProgressStage}\"", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("Text=\"{Binding UpdateProgressPercent}\"", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains(
+            "Visibility=\"{Binding IsUpdateInProgress, Converter={StaticResource BooleanToVisibilityConverter}}\"",
+            StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("Style=\"{StaticResource UpdateProgressBar}\"", StringComparison.Ordinal));
         Assert.True(updateWindowXaml.Contains("IsEnabled=\"{Binding CanDismissUpdatePrompt}\"", StringComparison.Ordinal));
-        Assert.True(updateWindowXaml.Contains("install the update, then launch the new version", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("Text=\"Download\"", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("Text=\"Verify\"", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("Text=\"Install + relaunch\"", StringComparison.Ordinal));
+        Assert.True(updateWindowXaml.Contains("one final on-disk check before launch", StringComparison.Ordinal));
     }
 }
