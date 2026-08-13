@@ -1,25 +1,22 @@
-# TubeForge v2.2.7
+# TubeForge v2.2.8
 
-TubeForge v2.2.7 is a focused validation release for the updater shipped in v2.2.6. Production updater and media behavior is unchanged from v2.2.6; the new stable version lets an installed v2.2.6 build exercise the complete dark update prompt, streamed progress, verified installer handoff, and automatic relaunch against an official release.
+TubeForge v2.2.8 fixes a false 360p-only fallback affecting some public videos whose actual YouTube format ladder includes separate high-resolution video and audio streams. Adaptive Googlevideo accessibility checks now use the same bounded player-style query ranges as the download engines instead of HTTP `Range` headers that some media endpoints reject.
 
 > [!IMPORTANT]
-> TubeForge v2.1.0 can detect a newer release, but its installed binary cannot enable the update button and does not contain the startup prompt. It cannot repair itself. If you are running v2.1.0, download and run `TubeForge-2.2.7-win-x64-setup.exe` once from the official release. Updates after that can use the in-app flow.
+> TubeForge v2.1.0 can detect a newer release, but its installed binary cannot enable the update button and does not contain the startup prompt. It cannot repair itself. If you are running v2.1.0, download and run `TubeForge-2.2.8-win-x64-setup.exe` once from the official release. Updates after that can use the in-app flow.
 
 Choose the per-user Windows x64 installer for normal use or a portable archive when needed. Verify `SHA256SUMS.txt` before running or extracting an asset. GitHub Actions release artifacts carry build-provenance attestations; the release manifest states whether Windows executables also have an Authenticode signature.
 
 Highlights:
 
-- add a deterministic streamed-download regression that holds the installer after its first chunk and proves non-zero visible progress, locked dismissal, fail-closed digest handling, and cleanup;
-- render the complete update prompt and native title bar with TubeForge's dark palette;
-- show current and target versions plus official installer size before any download;
-- explain the Download, Verify, and Install + relaunch stages up front;
-- display a live phase and percentage across release checks, installer download, cached-installer validation, and the final on-disk SHA-256 recheck;
-- keep `Not now`, window dismissal, update checks, and duplicate update actions disabled throughout the complete operation;
-- surface safe update failures in an explicit error color and restore controls for retry;
-- expose the same phase, percentage, progress bar, and dynamic action label in Settings;
-- retain the verified official-repository, asset-policy, dual-digest, quiet per-user install, and automatic relaunch boundaries from earlier releases.
+- use bounded `range`, `rn`, and `rbuf` query parameters for direct Googlevideo media probes, matching actual direct and segmented downloads;
+- retain HTTP header ranges for public HLS manifest probes;
+- keep strict HTTPS Googlevideo redirect validation and per-format provider user agents;
+- preserve adaptive MP4, WebM, and MKV video-plus-audio selection instead of falling back to a lone progressive stream after a false probe rejection;
+- label direct-client extraction truthfully as `DIRECT STREAMS VERIFIED` in the desktop app;
+- add deterministic coverage proving query-range probes for direct-client fallback, transformed watch-page media, and high-resolution adaptive video/audio pairs.
 
-Verification before publication covered 266 deterministic tests, including the streamed-progress failure path, plus the existing Release build, core performance, archive dependency/layout, launch, installer checksum, and embedded-payload gates. Published artifacts are rebuilt from the immutable release tag by GitHub Actions.
+Pre-release verification covered 266 deterministic tests, a zero-warning Release build, formatter validation, the core parser performance budget, archive checksum/dependency-layout/desktop-launch checks, and installer checksum/embedded-payload checks. A bounded authorized public canary exposed 23 formats and produced a 1920x1080 H.264 plus AAC MP4 that passed full mapped decode and Windows media-stack playback. Published artifacts are rebuilt and reverified from the immutable release tag by GitHub Actions.
 
 Security and support boundaries:
 

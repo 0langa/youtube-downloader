@@ -401,17 +401,27 @@ public sealed class YouTubeMetadataResolver
             return false;
         }
 
+        var requestNumber = 0;
         foreach (var format in probes)
         {
             var lastByte = Math.Max(0, (format.ContentLength ?? 1) - 1);
-            using var probe = new HttpRequestMessage(HttpMethod.Get, format.Url);
+            // Match the download engines: some adaptive Googlevideo URLs reject HTTP Range headers.
+            var usesRangeQuery = !format.IsLiveHls && IsGoogleVideo(format.Url);
+            var probeUri = usesRangeQuery
+                ? AddRangeQuery(format.Url, lastByte, lastByte, requestNumber++)
+                : format.Url;
+            using var probe = new HttpRequestMessage(HttpMethod.Get, probeUri);
             if (!HttpUserAgentHeader.TryApply(probe, format.HttpUserAgent))
             {
                 return false;
             }
 
             probe.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
-            probe.Headers.Range = new RangeHeaderValue(lastByte, lastByte);
+            if (!usesRangeQuery)
+            {
+                probe.Headers.Range = new RangeHeaderValue(lastByte, lastByte);
+            }
+
             probe.Headers.Referrer = watchUrl;
             using var response = await _httpClient.SendAsync(
                 probe,
@@ -420,8 +430,7 @@ public sealed class YouTubeMetadataResolver
             var finalUri = response.RequestMessage?.RequestUri ?? format.Url;
             if (!response.IsSuccessStatusCode ||
                 finalUri.Scheme != Uri.UriSchemeHttps ||
-                (!finalUri.Host.Equals("googlevideo.com", StringComparison.OrdinalIgnoreCase) &&
-                 !finalUri.Host.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase)))
+                !IsGoogleVideo(finalUri))
             {
                 return false;
             }
@@ -591,21 +600,38 @@ public sealed class YouTubeMetadataResolver
         Uri watchUrl,
         CancellationToken cancellationToken)
     {
-        using var probe = new HttpRequestMessage(HttpMethod.Get, mediaUrl);
+        var usesRangeQuery = IsGoogleVideo(mediaUrl);
+        var probeUri = usesRangeQuery ? AddRangeQuery(mediaUrl, 0, 0, 0) : mediaUrl;
+        using var probe = new HttpRequestMessage(HttpMethod.Get, probeUri);
         AddBrowserHeaders(probe);
         probe.Headers.Accept.Clear();
         probe.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
-        probe.Headers.Range = new RangeHeaderValue(0, 0);
+        if (!usesRangeQuery)
+        {
+            probe.Headers.Range = new RangeHeaderValue(0, 0);
+        }
+
         probe.Headers.Referrer = watchUrl;
         using var response = await _httpClient.SendAsync(
             probe,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken).ConfigureAwait(false);
         var finalUri = response.RequestMessage?.RequestUri ?? mediaUrl;
-        return response.IsSuccessStatusCode &&
-               finalUri.Scheme == Uri.UriSchemeHttps &&
-               (finalUri.Host.Equals("googlevideo.com", StringComparison.OrdinalIgnoreCase) ||
-                finalUri.Host.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase));
+        return response.IsSuccessStatusCode && IsGoogleVideo(finalUri);
+    }
+
+    private static bool IsGoogleVideo(Uri uri) =>
+        uri.Scheme == Uri.UriSchemeHttps &&
+        (uri.Host.Equals("googlevideo.com", StringComparison.OrdinalIgnoreCase) ||
+         uri.Host.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase));
+
+    private static Uri AddRangeQuery(Uri source, long from, long to, int requestNumber)
+    {
+        var separator = string.IsNullOrEmpty(source.Query) ? "?" : "&";
+        return new Uri(
+            source.AbsoluteUri + separator +
+            $"range={from}-{to}&rn={requestNumber}&rbuf=0",
+            UriKind.Absolute);
     }
 
     private static Result<WatchPageData> ParseWithPlans(string html, PlayerTransformPlans plans)

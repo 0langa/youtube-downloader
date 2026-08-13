@@ -47,10 +47,10 @@ Live probes are opt-in and must use public media you are authorized to test. Nev
 Use an explicit release version. Current example:
 
 ```powershell
-.\scripts\Publish-Release.ps1 -Version 2.2.5
-.\scripts\Test-Release.ps1 -Version 2.2.5
-.\scripts\Publish-Installer.ps1 -Version 2.2.5
-.\scripts\Test-Installer.ps1 -Version 2.2.5
+.\scripts\Publish-Release.ps1 -Version 2.2.8
+.\scripts\Test-Release.ps1 -Version 2.2.8
+.\scripts\Publish-Installer.ps1 -Version 2.2.8
+.\scripts\Test-Installer.ps1 -Version 2.2.8
 ```
 
 Release artifacts are generated output and must not be committed. Authenticode signing is optional and fails closed when requested signing cannot be verified.

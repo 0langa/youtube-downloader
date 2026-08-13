@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.2.8 - 2026-08-13
+
+- Probe adaptive Googlevideo media with the same bounded player-style query ranges used by the download engines, preventing valid high-resolution video and companion audio from being discarded when a server rejects HTTP `Range` headers.
+- Preserve header-range accessibility probes for public HLS manifests while keeping direct media redirects restricted to trusted HTTPS Googlevideo hosts.
+- Report current `ClientResolved:*` extraction stages as `DIRECT STREAMS VERIFIED` instead of the misleading watch-page status.
+- Cover direct-client, transformed-watch-page, adaptive-pair, and active-live probe behavior with deterministic request-shape regressions.
+
 ## 2.2.7 - 2026-08-10
 
 - Add a deterministic streamed-installer regression proving non-zero visible progress, locked dismissal, fail-closed digest handling, and cleanup while a download is in flight.

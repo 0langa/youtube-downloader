@@ -131,8 +131,11 @@ public static class YouTubeMetadataResolverTests
             }
 
             Assert.Equal("fixture.googlevideo.com", request.RequestUri?.Host);
-            Assert.Equal(0L, request.Headers.Range?.Ranges.Single().From);
-            var probe = new HttpResponseMessage(HttpStatusCode.PartialContent)
+            Assert.True(request.Headers.Range is null);
+            Assert.Equal("0-0", QueryValue(request.RequestUri!, "range"));
+            Assert.Equal("0", QueryValue(request.RequestUri!, "rn"));
+            Assert.Equal("0", QueryValue(request.RequestUri!, "rbuf"));
+            var probe = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent([0])
             };
@@ -191,7 +194,11 @@ public static class YouTubeMetadataResolverTests
 
             Assert.Equal("fixture.googlevideo.com", request.RequestUri?.Host);
             Assert.Equal("fedc", QueryValue(request.RequestUri!, "n"));
-            return new HttpResponseMessage(HttpStatusCode.PartialContent)
+            Assert.True(request.Headers.Range is null);
+            Assert.Equal("0-0", QueryValue(request.RequestUri!, "range"));
+            Assert.Equal("0", QueryValue(request.RequestUri!, "rn"));
+            Assert.Equal("0", QueryValue(request.RequestUri!, "rbuf"));
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent([0])
             };
@@ -252,9 +259,12 @@ public static class YouTubeMetadataResolverTests
             if (request.Method == HttpMethod.Get)
             {
                 Assert.Equal("fixture.googlevideo.com", request.RequestUri?.Host);
-                Assert.Equal(9L, request.Headers.Range?.Ranges.Single().From);
+                Assert.True(request.Headers.Range is null);
+                Assert.Equal("9-9", QueryValue(request.RequestUri!, "range"));
+                Assert.Equal("0", QueryValue(request.RequestUri!, "rn"));
+                Assert.Equal("0", QueryValue(request.RequestUri!, "rbuf"));
                 Assert.True(request.Headers.UserAgent.ToString().Contains("youtube.vr.oculus", StringComparison.Ordinal));
-                return new HttpResponseMessage(HttpStatusCode.PartialContent)
+                return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new ByteArrayContent([0])
                 };
@@ -342,8 +352,11 @@ public static class YouTubeMetadataResolverTests
 
             var formatId = int.Parse(QueryValue(request.RequestUri!, "itag")!);
             var length = formatId == 401 ? 100L : 20L;
-            Assert.Equal(length - 1, request.Headers.Range?.Ranges.Single().From);
-            return new HttpResponseMessage(HttpStatusCode.PartialContent)
+            Assert.True(request.Headers.Range is null);
+            Assert.Equal($"{length - 1}-{length - 1}", QueryValue(request.RequestUri!, "range"));
+            Assert.Equal(formatId == 401 ? "0" : "1", QueryValue(request.RequestUri!, "rn"));
+            Assert.Equal("0", QueryValue(request.RequestUri!, "rbuf"));
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent([0])
             };

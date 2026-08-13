@@ -1775,7 +1775,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
             }
 
-            var extractionStatus = result.Value.Diagnostics?.Stage == "AndroidClientResolved"
+            var extractionStage = result.Value.Diagnostics?.Stage;
+            var extractionStatus = extractionStage == "AndroidClientResolved" ||
+                                   extractionStage?.StartsWith("ClientResolved:", StringComparison.Ordinal) == true
                 ? "DIRECT STREAMS VERIFIED"
                 : "WATCH PAGE RESOLVED";
             ExtractionStatus = _metadata.ContentKind switch
