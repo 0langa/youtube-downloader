@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.3.2 - 2026-08-18
+
+- Delete the previous installation the installer retains for rollback, once the new version has
+  started successfully. It was only cleared at the start of the next install or on uninstall, so
+  a user who updated once and then stopped kept a full duplicate of the old version — around
+  490 MB — indefinitely.
+
 ## 2.3.1 - 2026-08-18
 
 - Release the per-host transfer slot as soon as a job's network phase ends, in every download

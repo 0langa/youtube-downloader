@@ -1552,9 +1552,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             PumpQueue();
         }
 
-        // Installers downloaded by earlier updates are never needed again and are large enough to
-        // matter; this runs off the UI thread and is best-effort.
-        _ = Task.Run(() => GitHubUpdateClient.PruneObsoleteInstallers(_updateDirectory, _currentVersion));
+        // Disk left behind by earlier updates: superseded installers, and the previous
+        // installation the installer retains for rollback. Reaching this point proves this build
+        // starts, which is the condition that copy was being kept for. Best-effort, off the UI thread.
+        _ = Task.Run(() =>
+        {
+            GitHubUpdateClient.PruneObsoleteInstallers(_updateDirectory, _currentVersion);
+            SupersededInstallCleaner.TryRemoveRetainedRollback(
+                SupersededInstallCleaner.DefaultProgramsRoot,
+                Environment.ProcessPath);
+        });
 
         if (!ShowResponsibleUseNotice && EnableAutomaticUpdateChecks)
         {

@@ -19,7 +19,7 @@ The self-contained release build restores only the exact Microsoft .NET runtime 
 Keep the downloaded installer or ZIP and `SHA256SUMS.txt` in the same directory. In PowerShell:
 
 ```powershell
-$version = '2.3.1'
+$version = '2.3.2'
 $name = "TubeForge-$version-win-x64-setup.exe"
 $expected = (Get-Content .\SHA256SUMS.txt | Where-Object { $_ -match "  $([regex]::Escape($name))$" }).Split(' ')[0]
 $actual = (Get-FileHash -LiteralPath ".\$name" -Algorithm SHA256).Hash
@@ -49,6 +49,7 @@ gh attestation verify ".\$name" -R 0langa/TubeForge
 2. Let the startup check show the update prompt, use Settings → Check now, or download the new installer from the official release.
 3. Choose `Update now` to authorize the full update. TubeForge shows the current and target versions, installer size, active phase, and percentage while it downloads the official installer and verifies the repository, version, asset name, size, GitHub digest, and matching SHA-256 manifest.
 4. TubeForge keeps progress visible during the final staged-installer SHA-256 recheck, then closes the running version, installs the update for the current Windows user, and launches the updated app. Existing local settings, queue, and Library are reused from `%LOCALAPPDATA%\TubeForge`.
+5. The installer moves the previous installation aside as `TubeForge.rollback` so a failed install can be restored. Once the updated app starts successfully it deletes that copy, along with any installer it downloaded for a version you are already running.
 
 Portable users should verify and extract the new archive to a sibling directory. Keep the prior portable directory until the new version has completed an analyze/download smoke test.
 
