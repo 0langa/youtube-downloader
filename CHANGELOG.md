@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.3.1 - 2026-08-18
+
 - Release the per-host transfer slot as soon as a job's network phase ends, in every download
   path. It was still held across adaptive muxing and full re-encodes, so one converting job
   blocked other transfers to the same host for the length of the conversion.
