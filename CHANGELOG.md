@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.3.0 - 2026-08-18
+
 ### Startup
 
 - Publish the application as a single bundled executable. The previous 265-file layout made the first launch after every install or update take 11.7 to 16.1 seconds on a measured cold cache, against 1.5 to 2.6 seconds for the bundle.

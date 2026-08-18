@@ -19,7 +19,7 @@ The self-contained release build restores only the exact Microsoft .NET runtime 
 Keep the downloaded installer or ZIP and `SHA256SUMS.txt` in the same directory. In PowerShell:
 
 ```powershell
-$version = '2.2.9'
+$version = '2.3.0'
 $name = "TubeForge-$version-win-x64-setup.exe"
 $expected = (Get-Content .\SHA256SUMS.txt | Where-Object { $_ -match "  $([regex]::Escape($name))$" }).Split(' ')[0]
 $actual = (Get-FileHash -LiteralPath ".\$name" -Algorithm SHA256).Hash

@@ -2,7 +2,7 @@
 
 YouTube is an upstream service outside TubeForge's control. Compatibility is versioned by TubeForge release and verified with synthetic fixtures plus bounded public canaries; it is not a permanent guarantee.
 
-## Unreleased compatibility status
+## v2.3.0 compatibility status
 
 TubeForge now asks both primary player clients on every analysis and combines whatever each one verifies, instead of stopping at the first client that answers. No single client publishes the whole ladder, so a first-client-wins design silently caps quality whenever the winning client happens to carry less.
 
