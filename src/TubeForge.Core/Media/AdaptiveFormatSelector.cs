@@ -56,8 +56,13 @@ public static class AdaptiveFormatSelector
         ArgumentNullException.ThrowIfNull(audioFormats);
         return audioFormats
             .Where(audio => AreMkvMuxCompatible(video, audio))
-            .OrderByDescending(audio => audio.Bitrate ?? 0)
+            // Loudness-compressed and dubbed tracks are ranked out before bitrate is considered:
+            // a DRC duplicate always declares a marginally higher bitrate than its original.
+            .OrderBy(audio => audio.IsDrc)
+            .ThenByDescending(audio => audio.IsOriginalAudio)
+            .ThenByDescending(audio => audio.Bitrate ?? 0)
             .ThenByDescending(audio => audio.AudioSampleRate ?? 0)
+            .ThenByDescending(audio => audio.AudioChannels ?? 0)
             .ThenByDescending(audio => AreMuxCompatible(video, audio))
             .ThenByDescending(audio => audio.AudioCodec == AudioCodec.Opus)
             .ThenBy(audio => audio.FormatId)

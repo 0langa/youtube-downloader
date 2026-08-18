@@ -199,7 +199,10 @@ try {
         'publish', (Join-Path $repoRoot 'src\TubeForge.App\TubeForge.App.csproj'),
         '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'true',
         '--source', 'https://api.nuget.org/v3/index.json',
-        '--output', $appDirectory, "-p:Version=$Version", '-p:PublishSingleFile=false',
+        '--output', $appDirectory, "-p:Version=$Version",
+        # Matches Publish-Release.ps1: one bundled file instead of 265 loose ones, which is what
+        # makes the first launch after an install or update fast.
+        '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true',
         '-p:PublishTrimmed=false', '-p:PublishReadyToRun=false'
     )
 

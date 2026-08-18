@@ -89,6 +89,12 @@ if (data.Diagnostics is not null)
 {
     Console.WriteLine($"Extractor stage: {data.Diagnostics.Stage}");
     Console.WriteLine($"Transform plans/probes: {data.Diagnostics.TransformPlanCount}/{data.Diagnostics.ProbeAttemptCount}");
+    if (data.Diagnostics.ClientOutcomes is { Count: > 0 } outcomes)
+    {
+        Console.WriteLine("Client outcomes: " + string.Join(
+            ", ",
+            outcomes.Select(outcome => $"{outcome.Client}={outcome.Result}({outcome.FormatCount})")));
+    }
 }
 
 var best = AdaptiveFormatSelector.SelectBest(data.Metadata.Formats);

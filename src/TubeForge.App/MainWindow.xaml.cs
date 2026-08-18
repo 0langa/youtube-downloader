@@ -24,7 +24,9 @@ public partial class MainWindow : Window
     {
         _performanceProbe = performanceProbe;
         _viewModel = new MainViewModel(performanceProbe?.ApplicationDataDirectory);
+        _performanceProbe?.MarkPhase("viewModelConstructed");
         InitializeComponent();
+        _performanceProbe?.MarkPhase("xamlLoaded");
         DataContext = _viewModel;
         _viewModel.UpdateAvailable += ViewModel_OnUpdateAvailable;
         _viewModel.UpdateInstallerStarted += ViewModel_OnUpdateInstallerStarted;
@@ -45,7 +47,9 @@ public partial class MainWindow : Window
 
     private async void MainWindow_OnLoaded(object sender, RoutedEventArgs e)
     {
+        _performanceProbe?.MarkPhase("windowLoaded");
         await _viewModel.InitializeAsync();
+        _performanceProbe?.MarkPhase("stateLoaded");
         if (_viewModel.ShowResponsibleUseNotice)
         {
             ResponsibleUseAcceptButton.Focus();

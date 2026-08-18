@@ -248,9 +248,10 @@ public static class YouTubeMetadataResolverTests
             }
             """;
         var requestCount = 0;
+        var requestedClients = new System.Collections.Concurrent.ConcurrentBag<string>();
         using var handler = new StubHandler(request =>
         {
-            requestCount++;
+            Interlocked.Increment(ref requestCount);
             if (request.Method == HttpMethod.Get && request.RequestUri?.Host == "www.youtube.com")
             {
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) };
@@ -263,7 +264,6 @@ public static class YouTubeMetadataResolverTests
                 Assert.Equal("9-9", QueryValue(request.RequestUri!, "range"));
                 Assert.Equal("0", QueryValue(request.RequestUri!, "rn"));
                 Assert.Equal("0", QueryValue(request.RequestUri!, "rbuf"));
-                Assert.True(request.Headers.UserAgent.ToString().Contains("Version/26.0", StringComparison.Ordinal));
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new ByteArrayContent([0])
@@ -272,8 +272,7 @@ public static class YouTubeMetadataResolverTests
 
             Assert.Equal(HttpMethod.Post, request.Method);
             Assert.Equal("/youtubei/v1/player", request.RequestUri?.AbsolutePath);
-            Assert.Equal("101", request.Headers.GetValues("X-YouTube-Client-Name").Single());
-            Assert.Equal("1.02", request.Headers.GetValues("X-YouTube-Client-Version").Single());
+            requestedClients.Add(request.Headers.GetValues("X-YouTube-Client-Name").Single());
             Assert.Equal("application/json", request.Content?.Headers.ContentType?.MediaType);
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(playerResponse) };
         });
@@ -290,7 +289,11 @@ public static class YouTubeMetadataResolverTests
         Assert.Equal("Android metadata", result.Value.Metadata.Title);
         Assert.Equal(VideoContentKind.Short, result.Value.Metadata.ContentKind);
         Assert.Equal("ClientResolved:VISIONOS", result.Value.Diagnostics?.Stage);
-        Assert.Equal(3, requestCount);
+        // Both primary clients are asked on every analysis; their ladders are complementary.
+        Assert.True(requestedClients.Contains("101"));
+        Assert.True(requestedClients.Contains("28"));
+        Assert.Equal(2, requestedClients.Count);
+        Assert.Equal(2, result.Value.Diagnostics?.ClientOutcomes?.Count);
     }
 
     [Test]
@@ -339,7 +342,7 @@ public static class YouTubeMetadataResolverTests
         var requestCount = 0;
         using var handler = new StubHandler(request =>
         {
-            requestCount++;
+            Interlocked.Increment(ref requestCount);
             if (request.Method == HttpMethod.Get && request.RequestUri?.Host == "www.youtube.com")
             {
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) };
@@ -371,11 +374,13 @@ public static class YouTubeMetadataResolverTests
         var selection = AdaptiveFormatSelector.SelectBest(result.Value.Metadata.Formats);
         Assert.Equal(3, result.Value.Metadata.Formats.Count);
         Assert.Equal(1, result.Value.Metadata.Formats.Count(format => format.FormatId == 18));
-        Assert.Equal("ClientResolved:VISIONOS+WatchPage", result.Value.Diagnostics?.Stage);
+        // The watch page's itag 18 is already in the client ladder, so it adds nothing and is
+        // no longer credited as a contributor.
+        Assert.Equal("ClientResolved:VISIONOS", result.Value.Diagnostics?.Stage);
         Assert.True(selection?.RequiresMuxing == true);
         Assert.Equal(401, selection!.Video.FormatId);
         Assert.Equal(140, selection.Audio!.FormatId);
-        Assert.Equal(4, requestCount);
+        Assert.Equal(7, requestCount);
     }
 
     [Test]
@@ -408,7 +413,7 @@ public static class YouTubeMetadataResolverTests
               }]}
             }
             """;
-        var clientNames = new List<string>();
+        var clientNames = new System.Collections.Concurrent.ConcurrentQueue<string>();
         using var handler = new StubHandler(request =>
         {
             if (request.Method == HttpMethod.Get && request.RequestUri?.Host == "www.youtube.com")
@@ -419,7 +424,7 @@ public static class YouTubeMetadataResolverTests
             if (request.Method == HttpMethod.Post)
             {
                 var clientName = request.Headers.GetValues("X-YouTube-Client-Name").Single();
-                clientNames.Add(clientName);
+                clientNames.Enqueue(clientName);
                 if (clientName == "7")
                 {
                     Assert.True(request.Headers.GetValues("User-Agent").Single()
@@ -447,7 +452,10 @@ public static class YouTubeMetadataResolverTests
         Assert.True(result.IsSuccess, result.Error?.Message);
         Assert.Equal("ClientResolved:TVHTML5", result.Value.Diagnostics?.Stage);
         Assert.Equal(18, result.Value.Metadata.Formats.Single().FormatId);
-        Assert.SequenceEqual(new[] { "101", "28", "56", "7" }, clientNames);
+        // Primaries run together, then the fallbacks are tried one at a time in declared order.
+        var attempted = clientNames.ToArray();
+        Assert.SequenceEqual(new[] { "101", "28" }, attempted.Take(2).Order().ToArray());
+        Assert.SequenceEqual(new[] { "5", "7" }, attempted.Skip(2).ToArray());
     }
 
     [Test]
@@ -472,7 +480,7 @@ public static class YouTubeMetadataResolverTests
         var requestCount = 0;
         using var handler = new StubHandler(request =>
         {
-            requestCount++;
+            Interlocked.Increment(ref requestCount);
             if (request.Method == HttpMethod.Get && request.RequestUri?.AbsolutePath == "/watch")
             {
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) };
@@ -480,7 +488,6 @@ public static class YouTubeMetadataResolverTests
 
             if (request.Method == HttpMethod.Post)
             {
-                Assert.Equal("101", request.Headers.GetValues("X-YouTube-Client-Name").Single());
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(playerResponse) };
             }
 
@@ -498,8 +505,8 @@ public static class YouTubeMetadataResolverTests
         Assert.Equal(VideoContentKind.LiveActive, result.Value.Metadata.ContentKind);
         Assert.True(result.Value.Metadata.Formats.Single().IsLiveHls);
         Assert.False(result.Value.Metadata.Formats.Single().IsLiveManifestPending);
-        Assert.Equal("ClientResolved:VISIONOS+WatchPage", result.Value.Diagnostics?.Stage);
-        Assert.Equal(3, requestCount);
+        Assert.Equal("ClientResolved:VISIONOS", result.Value.Diagnostics?.Stage);
+        Assert.Equal(5, requestCount);
     }
 
     [Test]
@@ -516,7 +523,7 @@ public static class YouTubeMetadataResolverTests
         var requestCount = 0;
         using var handler = new StubHandler(request =>
         {
-            requestCount++;
+            Interlocked.Increment(ref requestCount);
             return request.Method == HttpMethod.Get
                 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(watchPage) }
                 : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(activeWithoutManifest) };
@@ -529,7 +536,7 @@ public static class YouTubeMetadataResolverTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Video.LiveManifestUnavailable", result.Error?.Code);
-        Assert.Equal(6, requestCount);
+        Assert.Equal(7, requestCount);
     }
 
     private static string? QueryValue(Uri uri, string key)

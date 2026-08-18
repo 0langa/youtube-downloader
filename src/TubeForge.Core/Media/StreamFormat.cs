@@ -28,6 +28,22 @@ public sealed record StreamFormat
 
     public int? AudioSampleRate { get; init; }
 
+    public int? AudioChannels { get; init; }
+
+    /// <summary>
+    /// True when the provider published this track with dynamic range compression applied.
+    /// A DRC track is a loudness-normalised duplicate of an original track that carries the same
+    /// format identifier and a marginally higher declared bitrate, so it must never win a
+    /// bitrate comparison against the original.
+    /// </summary>
+    public bool IsDrc { get; init; }
+
+    /// <summary>Audio track language identifier, when the provider exposes multiple tracks.</summary>
+    public string? AudioLanguage { get; init; }
+
+    /// <summary>True when the provider marks this audio track as the video's original language.</summary>
+    public bool IsOriginalAudio { get; init; }
+
     public bool IsHdr { get; init; }
 
     public string QualityLabel { get; init; } = string.Empty;

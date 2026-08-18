@@ -20,6 +20,8 @@ internal sealed class DesktopPerformanceProbe
     private static readonly TimeSpan FrameCaptureDuration = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan IdleCpuCaptureDuration = TimeSpan.FromSeconds(3);
     private readonly string _reportPath;
+    private readonly Dictionary<string, double> _phases = [];
+    private readonly Stopwatch _phaseClock = Stopwatch.StartNew();
 
     private DesktopPerformanceProbe(string reportPath)
     {
@@ -28,6 +30,16 @@ internal sealed class DesktopPerformanceProbe
     }
 
     public string ApplicationDataDirectory { get; }
+
+    /// <summary>
+    /// Records the elapsed time from probe creation to a named startup milestone. Without a
+    /// breakdown a slow launch only reports one number, and every diagnosis starts from scratch.
+    /// </summary>
+    public void MarkPhase(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        _phases[name] = _phaseClock.Elapsed.TotalMilliseconds;
+    }
 
     public static DesktopPerformanceProbe? TryCreate(IReadOnlyList<string> arguments)
     {
@@ -105,7 +117,8 @@ internal sealed class DesktopPerformanceProbe
                 workingSetMebibytes,
                 uiFrameP95Milliseconds = frameP95,
                 uiLongFramePercent = longFramePercent,
-                uiFrameSamples = frameIntervals.Count
+                uiFrameSamples = frameIntervals.Count,
+                startupPhaseMilliseconds = _phases
             },
             budgets = new
             {

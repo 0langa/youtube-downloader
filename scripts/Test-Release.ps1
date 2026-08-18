@@ -115,9 +115,16 @@ try {
             throw "$model archive contains an unexpected FFmpeg build."
         }
 
-        $coreRuntime = Test-Path -LiteralPath (Join-Path $destination 'coreclr.dll') -PathType Leaf
-        if (($model -eq 'self-contained') -ne $coreRuntime) {
-            throw "$model archive has an unexpected runtime dependency layout."
+        # Both models publish as a single bundled executable, so the runtime is inside
+        # TubeForge.exe rather than beside it. A self-contained bundle carries the whole runtime
+        # and is therefore an order of magnitude larger than a framework-dependent one.
+        $applicationBytes = (Get-Item -LiteralPath (Join-Path $destination 'TubeForge.exe')).Length
+        if (Test-Path -LiteralPath (Join-Path $destination 'coreclr.dll') -PathType Leaf) {
+            throw "$model archive published loose runtime files instead of a single bundle."
+        }
+        $carriesRuntime = $applicationBytes -gt 60MB
+        if (($model -eq 'self-contained') -ne $carriesRuntime) {
+            throw "$model archive has an unexpected runtime dependency layout ($applicationBytes bytes)."
         }
 
         $manifestArtifact = @($manifest.artifacts | Where-Object { $_.dependencyModel -eq $model })

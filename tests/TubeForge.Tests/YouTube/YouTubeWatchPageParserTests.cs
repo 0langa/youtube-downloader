@@ -216,6 +216,80 @@ public static class YouTubeWatchPageParserTests
         Assert.True(upcoming.Value.Metadata.Formats.Single().IsLiveManifestPending);
     }
 
+    [Test]
+    public static void KeepsOriginalAudioOverLoudnessCompressedDuplicate()
+    {
+        var result = YouTubeWatchPageParser.Parse(PlayerResponse("""
+            "videoDetails":{"videoId":"Fixture123_","title":"DRC fixture","lengthSeconds":"10"},
+            "streamingData":{"adaptiveFormats":[{
+              "itag":251,
+              "url":"https://fixture.googlevideo.com/videoplayback?id=original&itag=251",
+              "mimeType":"audio/webm; codecs=\"opus\"",
+              "bitrate":143452,"audioSampleRate":"48000","audioChannels":2,"contentLength":"20"
+            },{
+              "itag":251,
+              "url":"https://fixture.googlevideo.com/videoplayback?id=drc&itag=251",
+              "mimeType":"audio/webm; codecs=\"opus\"",
+              "bitrate":143908,"audioSampleRate":"48000","audioChannels":2,"isDrc":true,
+              "contentLength":"20"
+            }]}
+            """));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        var audio = result.Value.Metadata.Formats.Single();
+        // The compressed duplicate declares the higher bitrate, so a bitrate-only comparison
+        // would silently downgrade every download to the loudness-normalised track.
+        Assert.False(audio.IsDrc);
+        Assert.Equal(143452L, audio.Bitrate);
+        Assert.Equal(2, audio.AudioChannels);
+        Assert.True(audio.Url.Query.Contains("id=original", StringComparison.Ordinal));
+    }
+
+    [Test]
+    public static void KeepsOriginalLanguageAudioOverDubbedTrackWithSameFormatId()
+    {
+        var result = YouTubeWatchPageParser.Parse(PlayerResponse("""
+            "videoDetails":{"videoId":"Fixture123_","title":"Dub fixture","lengthSeconds":"10"},
+            "streamingData":{"adaptiveFormats":[{
+              "itag":140,
+              "url":"https://fixture.googlevideo.com/videoplayback?id=dubbed&itag=140",
+              "mimeType":"audio/mp4; codecs=\"mp4a.40.2\"",
+              "bitrate":130000,"contentLength":"20",
+              "audioTrack":{"id":"de.3","displayName":"German","audioIsDefault":false}
+            },{
+              "itag":140,
+              "url":"https://fixture.googlevideo.com/videoplayback?id=original&itag=140",
+              "mimeType":"audio/mp4; codecs=\"mp4a.40.2\"",
+              "bitrate":130000,"contentLength":"20",
+              "audioTrack":{"id":"en.4","displayName":"English original","audioIsDefault":true}
+            }]}
+            """));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        var audio = result.Value.Metadata.Formats.Single();
+        Assert.True(audio.IsOriginalAudio);
+        Assert.Equal("en", audio.AudioLanguage);
+        Assert.True(audio.Url.Query.Contains("id=original", StringComparison.Ordinal));
+    }
+
+    [Test]
+    public static void MarksWideColourGamutLadderEntriesAsHdr()
+    {
+        var result = YouTubeWatchPageParser.Parse(PlayerResponse("""
+            "videoDetails":{"videoId":"Fixture123_","title":"HDR fixture","lengthSeconds":"10"},
+            "streamingData":{"adaptiveFormats":[{
+              "itag":337,
+              "url":"https://fixture.googlevideo.com/videoplayback?id=hdr&itag=337",
+              "mimeType":"video/webm; codecs=\"vp9.2\"",
+              "width":3840,"height":2160,"fps":60,"bitrate":25000000,"contentLength":"100",
+              "colorInfo":{"primaries":"COLOR_PRIMARIES_BT2020"}
+            }]}
+            """));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.True(result.Value.Metadata.Formats.Single().IsHdr);
+    }
+
     private static string PlayerResponse(string body) => $$"""
         <script>var ytInitialPlayerResponse={
           "playabilityStatus":{"status":"OK"},

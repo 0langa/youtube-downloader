@@ -43,6 +43,51 @@ public static class GitHubUpdateClientTests
     }
 
     [Test]
+    public static void PrunesInstallersForVersionsAlreadyInstalled()
+    {
+        using var directory = new TestDirectory();
+        var obsolete = new[]
+        {
+            "TubeForge-2.2.2-win-x64-setup.exe",
+            "TubeForge-2.2.7-win-x64-setup.exe",
+            "TubeForge-2.2.9-win-x64-setup.exe"
+        };
+        var kept = new[]
+        {
+            "TubeForge-2.3.0-win-x64-setup.exe",
+            "TubeForge-notaversion-win-x64-setup.exe",
+            "unrelated.exe"
+        };
+        foreach (var name in obsolete.Concat(kept))
+        {
+            File.WriteAllText(Path.Combine(directory.Path, name), "payload");
+        }
+
+        GitHubUpdateClient.PruneObsoleteInstallers(directory.Path, new Version(2, 2, 9));
+
+        // Each installer is around a quarter of a gigabyte and nothing else ever removed them.
+        foreach (var name in obsolete)
+        {
+            Assert.False(File.Exists(Path.Combine(directory.Path, name)));
+        }
+
+        foreach (var name in kept)
+        {
+            Assert.True(File.Exists(Path.Combine(directory.Path, name)));
+        }
+    }
+
+    [Test]
+    public static void IgnoresAMissingUpdateDirectory()
+    {
+        using var directory = new TestDirectory();
+
+        GitHubUpdateClient.PruneObsoleteInstallers(
+            Path.Combine(directory.Path, "absent"),
+            new Version(2, 2, 9));
+    }
+
+    [Test]
     public static async Task DownloadsRedirectedInstallerWithApiAndManifestDigests()
     {
         var fixture = ReleaseFixture.Create();
@@ -236,5 +281,33 @@ public static class GitHubUpdateClientTests
 
         private static Task<HttpResponseMessage> Response(HttpStatusCode status, HttpContent content) =>
             Task.FromResult(new HttpResponseMessage(status) { Content = content });
+    }
+
+    private sealed class TestDirectory : IDisposable
+    {
+        private static readonly string SafeRoot = System.IO.Path.GetFullPath(
+            System.IO.Path.Combine(System.IO.Path.GetTempPath(), "TubeForge.Tests"));
+
+        public TestDirectory()
+        {
+            Path = System.IO.Path.Combine(SafeRoot, Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public void Dispose()
+        {
+            var resolved = System.IO.Path.GetFullPath(Path);
+            if (!resolved.StartsWith(SafeRoot + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Refusing to clean a test directory outside the safe root.");
+            }
+
+            if (Directory.Exists(resolved))
+            {
+                Directory.Delete(resolved, recursive: true);
+            }
+        }
     }
 }

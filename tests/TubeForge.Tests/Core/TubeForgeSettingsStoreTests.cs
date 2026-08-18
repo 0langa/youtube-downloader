@@ -52,6 +52,31 @@ public static class TubeForgeSettingsStoreTests
     }
 
     [Test]
+    public static async Task PreservesSettingsWrittenByANewerBuildBeforeDefaultsCanReplaceThem()
+    {
+        using var directory = new TestDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        var future = """
+            {"schemaVersion":999,"downloadFolder":"C:\Downloads","maximumConcurrentDownloads":2}
+            """;
+        await File.WriteAllTextAsync(path, future);
+        var store = new TubeForgeSettingsStore(path);
+
+        var load = await store.LoadAsync(Settings(directory.Path));
+
+        Assert.False(load.IsSuccess);
+        // Without the sidecar, the first save from defaults silently discards a configuration the
+        // user can still use after reinstalling the newer build.
+        var preserved = path + ".unreadable";
+        Assert.True(File.Exists(preserved));
+        Assert.Equal(future, await File.ReadAllTextAsync(preserved));
+
+        var save = await store.SaveAsync(Settings(directory.Path));
+        Assert.True(save.IsSuccess, save.Error?.Message);
+        Assert.Equal(future, await File.ReadAllTextAsync(preserved));
+    }
+
+    [Test]
     public static async Task RejectsInvalidValuesAndLeavesMalformedFileUntouched()
     {
         using var directory = new TestDirectory();

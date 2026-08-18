@@ -4,6 +4,7 @@ using System.Globalization;
 using TubeForge.Core.Errors;
 using TubeForge.Core.Media;
 using TubeForge.Core.Results;
+using TubeForge.Media;
 
 namespace TubeForge.Transcoding;
 
@@ -330,6 +331,7 @@ internal sealed class FfmpegAudioProcessRunner : IFfmpegAudioProcessRunner
         }
 
         using var process = Process.Start(start);
+        ChildProcessJob.TryEnroll(process!);
         if (process is null)
         {
             throw new Win32Exception("FFmpeg did not start.");

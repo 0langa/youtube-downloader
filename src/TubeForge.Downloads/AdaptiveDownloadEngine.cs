@@ -79,8 +79,11 @@ public sealed class AdaptiveDownloadEngine(
             return Result<AdaptiveDownloadReceipt>.Failure(muxResult.Error!);
         }
 
-        File.Delete(request.Video.DestinationPath);
-        File.Delete(request.Audio.DestinationPath);
+        // The muxed output already exists and is validated, so a failure to remove an
+        // intermediate track is untidy, not fatal. Letting it throw here turned a completed
+        // download into a Failed queue row and left both tracks behind anyway.
+        TryDeleteIntermediate(request.Video.DestinationPath);
+        TryDeleteIntermediate(request.Audio.DestinationPath);
         progress?.Report(new DownloadProgress(
             totalBytes ?? videoResult.Value.BytesWritten + audioResult.Value.BytesWritten,
             totalBytes,
@@ -91,6 +94,19 @@ public sealed class AdaptiveDownloadEngine(
             muxResult.Value.Length,
             videoResult.Value.BytesWritten,
             audioResult.Value.BytesWritten));
+    }
+
+    private static void TryDeleteIntermediate(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          ArgumentException or NotSupportedException)
+        {
+            // A virus scanner or media indexer briefly holding the file is the common case.
+        }
     }
 
     private async Task<Result<(string Path, long Length)>> MuxTracksAsync(

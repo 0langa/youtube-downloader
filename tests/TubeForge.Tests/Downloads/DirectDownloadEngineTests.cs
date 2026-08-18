@@ -278,6 +278,32 @@ public static class DirectDownloadEngineTests
     }
 
     [Test]
+    public static async Task ClassifiesForbiddenAsARejectedStreamLinkWithoutRetrying()
+    {
+        using var directory = new TestDirectory();
+        var destination = Path.Combine(directory.Path, "fixture.mp4");
+        var attempts = 0;
+        using var handler = new StubHandler((_, _) =>
+        {
+            attempts++;
+            return Task.FromResult(Response(HttpStatusCode.Forbidden, []));
+        });
+        using var client = new HttpClient(handler);
+        var engine = new DirectDownloadEngine(
+            client,
+            DownloadUriPolicy.YouTubeMediaAndLoopback,
+            (_, _) => Task.CompletedTask);
+
+        var result = await engine.DownloadAsync(Request(destination, 4));
+
+        Assert.False(result.IsSuccess);
+        // Retrying the same expired link cannot succeed; the caller re-resolves instead.
+        Assert.Equal(DirectDownloadEngine.MediaUrlRejectedCode, result.Error?.Code);
+        Assert.False(result.Error?.IsTransient == true);
+        Assert.Equal(1, attempts);
+    }
+
+    [Test]
     public static async Task RespectsConfiguredRetryAttemptLimit()
     {
         using var directory = new TestDirectory();

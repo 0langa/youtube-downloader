@@ -33,7 +33,8 @@ public sealed record FormatItemViewModel(StreamFormat Format, StreamFormat? Audi
         AudioCodecLabel(),
         RequiresMuxing && AudioFormat?.Bitrate is > 0
             ? $"{Math.Round(AudioFormat.Bitrate.Value / 1000d):0} kbps audio"
-            : string.Empty
+            : string.Empty,
+        AudioChannelLabel()
     }.Where(value => !string.IsNullOrEmpty(value)));
 
     public string SizeLabel => CombinedLength() is > 0
@@ -60,6 +61,18 @@ public sealed record FormatItemViewModel(StreamFormat Format, StreamFormat? Audi
         AudioCodec.Vorbis => "Vorbis",
         AudioCodec.Unknown => "audio codec unknown",
         _ => string.Empty
+    };
+
+    /// <summary>
+    /// Names multichannel audio so a surround track is a visible, deliberate choice rather than a
+    /// surprise in what the listener expected to be a stereo download.
+    /// </summary>
+    private string AudioChannelLabel() => (AudioFormat ?? Format).AudioChannels switch
+    {
+        null or <= 2 => string.Empty,
+        6 => "5.1 surround",
+        8 => "7.1 surround",
+        var channels => $"{channels} channels"
     };
 
     private StreamFormat DisplayFormat() => RequiresMuxing

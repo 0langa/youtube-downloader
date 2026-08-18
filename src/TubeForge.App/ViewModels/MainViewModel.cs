@@ -149,6 +149,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly Dictionary<Guid, QueuedDownloadWork> _preparedQueueWork = [];
     private readonly Dictionary<Guid, CancellationTokenSource> _downloadCancellations = [];
     private readonly HashSet<Guid> _cancelledQueueItems = [];
+    private readonly HashSet<Guid> _undispatchableQueueItems = [];
+    private readonly HashSet<Guid> _relinkedQueueItems = [];
+    private readonly Dictionary<string, bool> _historyFilePresence = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _analysisCancellation;
     private string _urlText = string.Empty;
     private string _downloadFolder;
@@ -390,7 +393,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             () => _historySnapshot.Entries.Count > 0 || _historyUnavailable);
         RemoveMissingHistoryCommand = new AsyncRelayCommand(
             RemoveMissingHistoryAsync,
-            () => _historySnapshot.Entries.Any(entry => !File.Exists(entry.DestinationPath)));
+            // Answered from the presence cache: the predicate runs on the UI thread every time
+            // the Library changes, and stat-ing thousands of recorded paths there stalls the window.
+            () => _historySnapshot.Entries.Any(entry => !IsHistoryFilePresent(entry.DestinationPath)));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -1444,7 +1449,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         _isInitialized = true;
-        var settingsResult = await _settingsStore.LoadAsync(_settings);
+        // The four state files are independent, so they are read together rather than in series;
+        // each one costs a file open plus a JSON parse on a cold process.
+        var settingsTask = _settingsStore.LoadAsync(_settings);
+        var queueTask = _queueStore.LoadAsync();
+        var historyTask = _historyStore.LoadAsync();
+        var archiveTask = _archiveStore.LoadAsync();
+        var settingsResult = await settingsTask;
         if (settingsResult.IsSuccess)
         {
             _settings = settingsResult.Value;
@@ -1491,7 +1502,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             ShowResponsibleUseNotice = true;
         }
 
-        var queueResult = await _queueStore.LoadAsync();
+        var queueResult = await queueTask;
         if (!queueResult.IsSuccess)
         {
             _queueUnavailable = true;
@@ -1512,7 +1523,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
         }
 
-        var historyResult = await _historyStore.LoadAsync();
+        var historyResult = await historyTask;
         if (!historyResult.IsSuccess)
         {
             _historyUnavailable = true;
@@ -1525,7 +1536,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             RebuildHistoryItems();
         }
 
-        var archiveResult = await _archiveStore.LoadAsync();
+        var archiveResult = await archiveTask;
         if (!archiveResult.IsSuccess)
         {
             ArchiveStatus = $"{archiveResult.Error!.Message} ({archiveResult.Error.Code})";
@@ -1540,6 +1551,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             PumpQueue();
         }
+
+        // Installers downloaded by earlier updates are never needed again and are large enough to
+        // matter; this runs off the UI thread and is best-effort.
+        _ = Task.Run(() => GitHubUpdateClient.PruneObsoleteInstallers(_updateDirectory, _currentVersion));
 
         if (!ShowResponsibleUseNotice && EnableAutomaticUpdateChecks)
         {
@@ -2475,7 +2490,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         var audio = formats
             .Where(format => format.Kind == StreamKind.AudioOnly)
-            .OrderByDescending(format => format.Bitrate ?? 0)
+            .OrderBy(format => format.IsDrc)
+            .ThenByDescending(format => format.IsOriginalAudio)
+            .ThenByDescending(format => format.Bitrate ?? 0)
             .ThenByDescending(format => format.AudioSampleRate ?? 0)
             .ThenBy(format => format.FormatId)
             .ToArray();
@@ -2933,7 +2950,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         while (_queueDispatcher.ActiveCount < _queueDispatcher.MaximumConcurrency)
         {
             var next = _queueSnapshot.Items.FirstOrDefault(item =>
-                item.Status == DownloadQueueStatus.Queued && !_queueDispatcher.IsActive(item.Id));
+                item.Status == DownloadQueueStatus.Queued &&
+                !_queueDispatcher.IsActive(item.Id) &&
+                !_undispatchableQueueItems.Contains(item.Id));
             if (next is null || !_queueDispatcher.TryStart(next.Id))
             {
                 break;
@@ -2958,6 +2977,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 cancellationToken: cancellation.Token);
             if (startError is not null)
             {
+                // The item is still persisted as Queued, so the pump would pick it straight back
+                // up and spin. Park it until the user retries or the queue file becomes writable.
+                _undispatchableQueueItems.Add(itemId);
                 ReportQueueError(startError);
                 return;
             }
@@ -3099,6 +3121,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
                 else
                 {
+            // The per-host lease guards network requests only. FFmpeg work that follows is local,
+            // and holding the lease across it stalls every other transfer and any live capture.
+            mediaLease.Dispose();
                     StatusMessage = work.Output.BitrateKbps > 0
                         ? $"Converting to {work.Output.DisplayName} · {work.Output.BitrateKbps} kbps"
                         : $"Converting to {work.Output.DisplayName}";
@@ -3259,9 +3284,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     : SelectionPartialLength(work.Destination, work.Selection, work.Output);
             }
 
+            mediaLease.Dispose();
             if (downloadError?.Code == "Network.RateLimited")
             {
                 _hostRequestGate.Defer(work.Selection.Format.Url, downloadError.RetryAfter);
+            }
+
+            if (downloadError?.Code == DirectDownloadEngine.MediaUrlRejectedCode && await TryRequeueWithFreshLinksAsync(itemId))
+            {
+                return;
             }
 
             if (downloadError is not null)
@@ -3371,7 +3402,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         if (_preparedQueueWork.TryGetValue(itemId, out var prepared))
         {
-            return (prepared, null);
+            // Signed media URLs captured at analysis time expire. Reusing them for a queue that
+            // has been sitting for hours produces an unrecoverable HTTP 403 partway through.
+            if (HasUsableMediaUrls(prepared))
+            {
+                return (prepared, null);
+            }
+
+            _preparedQueueWork.Remove(itemId);
         }
 
         var item = _queueSnapshot.Items.FirstOrDefault(candidate => candidate.Id == itemId);
@@ -3586,6 +3624,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var queueError = await UpdateQueueItemAsync(itemId, status, error?.Code, completedBytes);
         if (queueError is not null)
         {
+            // The run has ended either way. Leaving the row rendered as Downloading would strand
+            // it with no Retry or Remove affordance, so reflect the terminal state in memory.
+            ApplyUnsavedQueueStatus(itemId, status, error?.Code, completedBytes);
             ReportQueueError(queueError);
             return;
         }
@@ -3639,6 +3680,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         ErrorMessage = string.Empty;
+        _undispatchableQueueItems.Remove(itemId);
         var error = await UpdateQueueItemAsync(itemId, DownloadQueueStatus.Queued, failureCode: null);
         if (error is not null)
         {
@@ -3649,11 +3691,33 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         PumpQueue();
     }
 
-    private void PauseQueueItem(Guid itemId)
+    private void PauseQueueItem(Guid itemId) => TryCancelDownload(itemId);
+
+    /// <summary>
+    /// Cancels a running download. The run owns its <see cref="CancellationTokenSource"/> and
+    /// disposes it in its finally block, so a cancel raised from the UI can always race a run
+    /// that just completed. Losing that race must not end the process.
+    /// </summary>
+    private bool TryCancelDownload(Guid itemId)
     {
-        if (_downloadCancellations.TryGetValue(itemId, out var cancellation))
+        if (!_downloadCancellations.TryGetValue(itemId, out var cancellation))
+        {
+            return false;
+        }
+
+        try
         {
             cancellation.Cancel();
+            return true;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+        catch (AggregateException)
+        {
+            // A callback registered on the token threw; the run is cancelled regardless.
+            return true;
         }
     }
 
@@ -3666,7 +3730,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         _cancelledQueueItems.Add(itemId);
-        if (_downloadCancellations.TryGetValue(itemId, out var cancellation))
+        if (_downloadCancellations.ContainsKey(itemId))
         {
             var persistenceError = await UpdateQueueItemAsync(
                 itemId,
@@ -3680,7 +3744,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            cancellation.Cancel();
+            // The run may have finished and disposed its source during the await above.
+            TryCancelDownload(itemId);
             return;
         }
 
@@ -3694,9 +3759,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void PauseAll()
     {
-        foreach (var cancellation in _downloadCancellations.Values.ToArray())
+        foreach (var itemId in _downloadCancellations.Keys.ToArray())
         {
-            cancellation.Cancel();
+            TryCancelDownload(itemId);
         }
     }
 
@@ -3779,9 +3844,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private async Task RemoveMissingHistoryAsync()
     {
-        var existing = _historySnapshot.Entries
-            .Where(entry => File.Exists(entry.DestinationPath))
-            .ToArray();
+        // Re-checked for real rather than read from the presence cache: this removes records, so
+        // it must not act on a stale reading. The check runs off the UI thread because a large
+        // Library or an offline volume would otherwise freeze the window.
+        var entries = _historySnapshot.Entries.ToArray();
+        var existing = await Task.Run(() => entries
+            .Where(entry =>
+            {
+                try
+                {
+                    return File.Exists(entry.DestinationPath);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                                  ArgumentException or NotSupportedException)
+                {
+                    return true;
+                }
+            })
+            .ToArray());
         await SaveHistoryEntriesAsync(existing);
     }
 
@@ -3934,6 +4014,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             _queueSnapshot = nextSnapshot;
+            _undispatchableQueueItems.ExceptWith(ids);
+            _relinkedQueueItems.ExceptWith(ids);
             foreach (var card in QueueItems.Where(item => ids.Contains(item.Id)).ToArray())
             {
                 QueueItems.Remove(card);
@@ -3983,10 +4065,82 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         };
         foreach (var entry in matching)
         {
-            HistoryItems.Add(new HistoryItemViewModel(entry, RevealDestination, RemoveHistoryItemAsync));
+            HistoryItems.Add(new HistoryItemViewModel(
+                entry,
+                RevealDestination,
+                RemoveHistoryItemAsync,
+                IsHistoryFilePresent));
         }
 
         NotifyHistoryProperties();
+        _ = RefreshHistoryPresenceAsync();
+    }
+
+    /// <summary>
+    /// Reports whether a recorded download is still on disk, from a cache that is refreshed off
+    /// the UI thread. Paths not yet measured are reported as present so a freshly rendered
+    /// Library never claims files are missing before it has looked.
+    /// </summary>
+    private bool IsHistoryFilePresent(string destinationPath) =>
+        !_historyFilePresence.TryGetValue(destinationPath, out var present) || present;
+
+    private async Task RefreshHistoryPresenceAsync()
+    {
+        var paths = _historySnapshot.Entries
+            .Select(entry => entry.DestinationPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (paths.Length == 0)
+        {
+            if (_historyFilePresence.Count > 0)
+            {
+                _historyFilePresence.Clear();
+                NotifyHistoryProperties();
+            }
+
+            return;
+        }
+
+        var measured = await Task.Run(() =>
+        {
+            var results = new Dictionary<string, bool>(paths.Length, StringComparer.OrdinalIgnoreCase);
+            foreach (var path in paths)
+            {
+                try
+                {
+                    results[path] = File.Exists(path);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                                  ArgumentException or NotSupportedException)
+                {
+                    // An unreachable volume is reported as present so the entry is never removed
+                    // just because the drive happened to be offline.
+                    results[path] = true;
+                }
+            }
+
+            return results;
+        });
+
+        var changed = measured.Count != _historyFilePresence.Count ||
+                      measured.Any(pair => !_historyFilePresence.TryGetValue(pair.Key, out var known) ||
+                                           known != pair.Value);
+        if (!changed)
+        {
+            return;
+        }
+
+        _historyFilePresence.Clear();
+        foreach (var pair in measured)
+        {
+            _historyFilePresence[pair.Key] = pair.Value;
+        }
+
+        NotifyHistoryProperties();
+        foreach (var item in HistoryItems)
+        {
+            item.RevealCommand.RaiseCanExecuteChanged();
+        }
     }
 
     private void RefreshQueueItem(DownloadQueueItem item)
@@ -4995,7 +5149,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         DownloadQueueItem item,
         CancellationToken cancellationToken = default)
     {
-        if (_queueUnavailable)
+        if (_queueUnavailable && !await TryRecoverQueueAsync(cancellationToken))
         {
             return new TubeForgeError(
                 "Queue.Unavailable",
@@ -5027,6 +5181,98 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             _queueMutationLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Puts an item back on the queue after the media server rejected its stream link, so the
+    /// next run re-resolves the video and continues from the bytes already on disk. Applied at
+    /// most once per item so an item that keeps being rejected still reaches a Failed state.
+    /// </summary>
+    private async Task<bool> TryRequeueWithFreshLinksAsync(Guid itemId)
+    {
+        if (!_relinkedQueueItems.Add(itemId))
+        {
+            return false;
+        }
+
+        _preparedQueueWork.Remove(itemId);
+        var error = await UpdateQueueItemAsync(itemId, DownloadQueueStatus.Queued, failureCode: null);
+        if (error is not null)
+        {
+            _relinkedQueueItems.Remove(itemId);
+            return false;
+        }
+
+        StatusMessage = "Stream link expired; refreshing and continuing";
+        return true;
+    }
+
+    private static bool HasUsableMediaUrls(QueuedDownloadWork work)
+    {
+        if (work.LiveCapture is not null)
+        {
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        return SignedMediaUrl.IsUsable(work.Selection.Format.Url, now) &&
+               (work.Selection.AudioFormat is null ||
+                SignedMediaUrl.IsUsable(work.Selection.AudioFormat.Url, now));
+    }
+
+    /// <summary>
+    /// Applies a terminal status to the in-memory queue when persistence failed, so the row stops
+    /// showing an active transfer that no longer exists. Disk state is repaired on the next
+    /// successful save or on the next load.
+    /// </summary>
+    private void ApplyUnsavedQueueStatus(
+        Guid itemId,
+        DownloadQueueStatus status,
+        string? failureCode,
+        long? completedBytes)
+    {
+        var item = _queueSnapshot.Items.FirstOrDefault(candidate => candidate.Id == itemId);
+        if (item is null)
+        {
+            return;
+        }
+
+        var updated = item with
+        {
+            Status = status,
+            FailureCode = failureCode,
+            BytesReceived = completedBytes ?? item.BytesReceived,
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+        _queueSnapshot = _queueSnapshot with
+        {
+            Items = _queueSnapshot.Items
+                .Select(existing => existing.Id == itemId ? updated : existing)
+                .ToArray()
+        };
+        RefreshQueueItem(updated);
+        NotifyQueueProperties();
+    }
+
+    /// <summary>
+    /// Retries the queue load after a startup failure. The original cause is usually transient
+    /// (antivirus or backup holding the file, a full disk), so latching the failure for the whole
+    /// session would block every later download for no reason.
+    /// </summary>
+    private async Task<bool> TryRecoverQueueAsync(CancellationToken cancellationToken)
+    {
+        var reloaded = await _queueStore.LoadAsync(cancellationToken);
+        if (!reloaded.IsSuccess)
+        {
+            return false;
+        }
+
+        _queueUnavailable = false;
+        _undispatchableQueueItems.Clear();
+        _queueSnapshot = reloaded.Value;
+        RebuildQueueItems();
+        NotifyQueueProperties();
+        return true;
     }
 
     private async Task<TubeForgeError?> UpdateQueueItemAsync(

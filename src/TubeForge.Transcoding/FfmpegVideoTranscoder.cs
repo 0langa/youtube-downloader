@@ -380,6 +380,7 @@ internal sealed class FfmpegVideoProcessRunner : IFfmpegVideoProcessRunner
         }
 
         using var process = Process.Start(start);
+        ChildProcessJob.TryEnroll(process!);
         if (process is null)
         {
             throw new Win32Exception("FFmpeg did not start.");

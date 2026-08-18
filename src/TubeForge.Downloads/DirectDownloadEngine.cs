@@ -564,11 +564,24 @@ public sealed class DirectDownloadEngine
         return null;
     }
 
+    /// <summary>Error code raised when the media server rejects a signed URL outright.</summary>
+    public const string MediaUrlRejectedCode = "Network.MediaUrlRejected";
+
     internal static Result<DownloadReceipt> HttpFailure(HttpResponseMessage response)
     {
         var statusCode = response.StatusCode;
         var transient = statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests ||
                         (int)statusCode >= 500;
+        if (statusCode == HttpStatusCode.Forbidden)
+        {
+            // A signed media URL that expired or was invalidated mid-transfer. Retrying the same
+            // URL cannot succeed, but re-resolving the video and starting again can.
+            return Result<DownloadReceipt>.Failure(new TubeForgeError(
+                MediaUrlRejectedCode,
+                "The media server rejected this stream link; it has expired or is no longer valid.",
+                "HTTP 403"));
+        }
+
         return Result<DownloadReceipt>.Failure(new TubeForgeError(
             statusCode == HttpStatusCode.TooManyRequests ? "Network.RateLimited" : "Network.HttpError",
             $"The media server returned HTTP {(int)statusCode}.",

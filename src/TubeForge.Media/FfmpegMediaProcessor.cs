@@ -525,18 +525,18 @@ public sealed class FfmpegMediaProcessor
             arguments.Add(ContainerFormat(outputContainer));
             arguments.Add(temporaryPath);
 
-            var exitCode = await _processRunner.RunAsync(
+            var run = await _processRunner.RunWithDiagnosticsAsync(
                     _executablePath,
                     arguments,
                     directory,
                     cancellationToken)
                 .ConfigureAwait(false);
-            if (exitCode != 0)
+            if (run.ExitCode != 0)
             {
                 return Failure(
                     "Media.FFmpegFailed",
                     $"FFmpeg could not finalize this {ContainerLabel(outputContainer)} file.",
-                    $"FFmpeg exited with code {exitCode}.");
+                    DescribeFailure(run));
             }
 
             var validation = ValidateOutput(temporaryPath, outputContainer);
@@ -643,18 +643,18 @@ public sealed class FfmpegMediaProcessor
         arguments.Add("-f");
         arguments.Add("null");
         arguments.Add("-");
-        var exitCode = await _processRunner.RunAsync(
+        var run = await _processRunner.RunWithDiagnosticsAsync(
                 _executablePath,
                 arguments,
                 Path.GetDirectoryName(Path.GetFullPath(path))!,
                 cancellationToken)
             .ConfigureAwait(false);
-        return exitCode == 0
+        return run.ExitCode == 0
             ? null
             : new TubeForgeError(
                 "Media.SubtitleValidationFailed",
                 "FFmpeg did not verify an embedded soft-subtitle stream.",
-                $"FFmpeg exited with code {exitCode}.");
+                DescribeFailure(run));
     }
 
     private async Task<TubeForgeError?> ValidateEmbeddedMetadataAsync(
@@ -897,12 +897,27 @@ public sealed class FfmpegMediaProcessor
         return null;
     }
 
+    /// <summary>
+    /// Describes a failed FFmpeg run as its exit code plus the reason FFmpeg printed, with local
+    /// paths removed. An exit code on its own gives the user nothing to act on.
+    /// </summary>
+    private static string DescribeFailure(FfmpegRunResult run)
+    {
+        var summary = FfmpegDiagnostics.Summarize(run.StandardError);
+        return summary.Length == 0
+            ? $"FFmpeg exited with code {run.ExitCode}."
+            : $"FFmpeg exited with code {run.ExitCode}: {summary}";
+    }
+
     private static Result<MediaProcessReceipt> Failure(
         string code,
         string message,
         string? detail = null) =>
         Result<MediaProcessReceipt>.Failure(new TubeForgeError(code, message, detail));
 }
+
+/// <summary>Exit code plus the captured diagnostic output of one FFmpeg invocation.</summary>
+internal readonly record struct FfmpegRunResult(int ExitCode, string StandardError);
 
 internal interface IFfmpegProcessRunner
 {
@@ -911,11 +926,91 @@ internal interface IFfmpegProcessRunner
         IReadOnlyList<string> arguments,
         string workingDirectory,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Runs FFmpeg and keeps its diagnostic output. Reporting only an exit code makes every
+    /// media failure look identical, so the reason FFmpeg gave is carried back to the caller.
+    /// </summary>
+    async Task<FfmpegRunResult> RunWithDiagnosticsAsync(
+        string executablePath,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        var exitCode = await RunAsync(executablePath, arguments, workingDirectory, cancellationToken)
+            .ConfigureAwait(false);
+        return new FfmpegRunResult(exitCode, string.Empty);
+    }
+}
+
+/// <summary>
+/// Reduces FFmpeg's diagnostic output to a short, path-free summary suitable for a user-facing
+/// error. Local paths and URLs are removed so a message shown in the UI, copied into a report or
+/// pasted into an issue never carries the user's folder names or a signed media link.
+/// </summary>
+internal static class FfmpegDiagnostics
+{
+    private const int MaximumSummaryLength = 240;
+
+    public static string Summarize(string standardError)
+    {
+        if (string.IsNullOrWhiteSpace(standardError))
+        {
+            return string.Empty;
+        }
+
+        var lines = standardError
+            .Split('\r', '\n')
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0)
+            .Select(Redact)
+            .Where(line => line.Length > 0)
+            .ToArray();
+        if (lines.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var summary = string.Join(" | ", lines.TakeLast(2));
+        return summary.Length <= MaximumSummaryLength
+            ? summary
+            : summary[..MaximumSummaryLength];
+    }
+
+    private static string Redact(string line)
+    {
+        var builder = new System.Text.StringBuilder(line.Length);
+        foreach (var token in line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var isPath = token.Contains(":\\", StringComparison.Ordinal) ||
+                         token.Contains(":/", StringComparison.Ordinal) ||
+                         token.StartsWith(@"\\", StringComparison.Ordinal) ||
+                         (token.Contains('/', StringComparison.Ordinal) &&
+                          token.Contains('.', StringComparison.Ordinal));
+            builder.Append(isPath ? "<path>" : token).Append(' ');
+        }
+
+        return builder.ToString().Trim();
+    }
 }
 
 internal sealed class FfmpegProcessRunner : IFfmpegProcessRunner
 {
     public async Task<int> RunAsync(
+        string executablePath,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunWithDiagnosticsAsync(
+            executablePath,
+            arguments,
+            workingDirectory,
+            cancellationToken).ConfigureAwait(false);
+        return result.ExitCode;
+    }
+
+    public async Task<FfmpegRunResult> RunWithDiagnosticsAsync(
         string executablePath,
         IReadOnlyList<string> arguments,
         string workingDirectory,
@@ -936,6 +1031,7 @@ internal sealed class FfmpegProcessRunner : IFfmpegProcessRunner
         }
 
         using var process = Process.Start(start);
+        ChildProcessJob.TryEnroll(process!);
         if (process is null)
         {
             throw new Win32Exception("FFmpeg did not start.");
@@ -958,8 +1054,8 @@ internal sealed class FfmpegProcessRunner : IFfmpegProcessRunner
             throw;
         }
 
-        _ = await standardError.ConfigureAwait(false);
+        var diagnostics = await standardError.ConfigureAwait(false);
         _ = await standardOutput.ConfigureAwait(false);
-        return process.ExitCode;
+        return new FfmpegRunResult(process.ExitCode, diagnostics);
     }
 }

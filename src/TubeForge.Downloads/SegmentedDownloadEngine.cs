@@ -400,6 +400,11 @@ internal sealed class SegmentedDownloadEngine(HttpClient httpClient, DownloadUri
                     isTransient: true);
             }
 
+            // Flush the segment's bytes to the device before recording it as complete. Marking it
+            // first means a power loss between the two leaves a resume that trusts a region the
+            // file system never wrote, and the finished file is silently corrupt.
+            RandomAccess.FlushToDisk(output);
+
             await stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {

@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Startup
+
+- Publish the application as a single bundled executable. The previous 265-file layout made the first launch after every install or update take 11.7 to 16.1 seconds on a measured cold cache, against 1.5 to 2.6 seconds for the bundle.
+- Load settings, queue, history, and archive state concurrently instead of one after another.
+- Answer Library file-presence questions from a cache refreshed off the UI thread, so a large Library or a disconnected drive no longer stalls the window during startup.
+- Virtualize the queue list instead of realizing a card for every recorded item.
+- Record startup phase timings in the desktop performance report.
+
+### Reliability
+
+- Keep the process alive after an unhandled failure reaches the dispatcher, record it to a local redacted error log, and tell the user which action was lost.
+- Stop cancelling a download from terminating the app when the run disposes its cancellation source during the same await.
+- Stop a queue-file write failure from re-dispatching the same item forever.
+- Recover automatically from a queue that could not be read at startup instead of blocking every download for the session.
+- Show a terminal state on a queue row whose status could not be saved, so it can still be retried or removed.
+- Re-resolve expired signed media links instead of failing the download, and classify HTTP 403 from the media server as a rejected link rather than a generic HTTP error.
+- Tie FFmpeg processes to the application with a job object so none can outlive it.
+- Report the reason FFmpeg gave for a failure, with local paths removed, instead of only an exit code.
+- Keep a completed adaptive download completed when an intermediate track cannot be deleted.
+- Allow a live capture to resume over a segment file left by an interrupted run.
+- Flush segment data to the device before recording the segment as complete.
+- Release the per-host transfer lease before local FFmpeg work rather than holding it throughout.
+
+### Media selection
+
+- Combine every verified client ladder instead of stopping at the first client that answers, and record per-client probe outcomes in extraction diagnostics.
+- Never select a loudness-compressed (DRC) duplicate or a dubbed audio track over the original: the compressed duplicate reports a marginally higher bitrate and would otherwise always win.
+- Read audio channel counts, DRC flags, and audio-track languages, and name multichannel audio in the format list.
+- Detect HDR from BT.2020 primaries as well as the quality label.
+
+### Housekeeping
+
+- Delete downloaded installers for versions already installed. These accumulated at roughly 250 MB each for the lifetime of an installation.
+- Preserve a settings file this build cannot read before defaults can overwrite it.
+
 ## 2.2.9 - 2026-08-18
 
 - Prefer a current public VisionOS player profile before AndroidVR, restoring directly downloadable adaptive video and audio ladders when AndroidVR exposes only the 360p progressive format without a GVS PO token.

@@ -1105,7 +1105,29 @@
                     </StackPanel>
                 </Border>
 
-                <ItemsControl Grid.Row="8" ItemsSource="{Binding QueueItems}">
+                <!-- Bounded and virtualizing: the queue holds up to 10,000 recorded items, and an
+                     unbounded ItemsControl inside the page ScrollViewer realizes a card for every
+                     one of them on first render. -->
+                <ItemsControl Grid.Row="8" ItemsSource="{Binding QueueItems}"
+                              MaxHeight="900"
+                              ScrollViewer.CanContentScroll="True"
+                              ScrollViewer.VerticalScrollBarVisibility="Auto"
+                              VirtualizingPanel.IsVirtualizing="True"
+                              VirtualizingPanel.VirtualizationMode="Recycling">
+                    <ItemsControl.Template>
+                        <ControlTemplate TargetType="ItemsControl">
+                            <ScrollViewer CanContentScroll="True" Focusable="False"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <ItemsPresenter />
+                            </ScrollViewer>
+                        </ControlTemplate>
+                    </ItemsControl.Template>
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel IsVirtualizing="True" VirtualizationMode="Recycling" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <Border Style="{StaticResource Card}" Margin="0,0,0,12">

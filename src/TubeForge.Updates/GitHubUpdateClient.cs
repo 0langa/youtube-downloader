@@ -182,6 +182,7 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
 
             await output.DisposeAsync().ConfigureAwait(false);
             File.Move(temporary, destination, overwrite: true);
+            PruneSupersededInstallers(directory, release.SetupAssetName);
             progress?.Report(1);
             return Result<UpdateDownloadReceipt>.Success(new UpdateDownloadReceipt(
                 destination,
@@ -401,6 +402,78 @@ public sealed class GitHubUpdateClient(HttpClient httpClient)
 
     private static Result<T> Failure<T>(string code, string message, string? detail = null) =>
         Result<T>.Failure(new TubeForgeError(code, message, detail));
+
+    /// <summary>
+    /// Deletes downloaded installers for versions the user is already running or has moved past.
+    /// Existing installations accumulated these for every update ever applied; nothing removed
+    /// them, and each is roughly a quarter of a gigabyte.
+    /// </summary>
+    public static void PruneObsoleteInstallers(string updateDirectory, Version currentVersion)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(updateDirectory);
+        ArgumentNullException.ThrowIfNull(currentVersion);
+        try
+        {
+            var directory = Path.GetFullPath(updateDirectory);
+            if (!Directory.Exists(directory))
+            {
+                return;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(directory, "TubeForge-*-setup.exe"))
+            {
+                if (TryParseInstallerVersion(Path.GetFileName(file), out var version) &&
+                    version <= currentVersion)
+                {
+                    TryDelete(file);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          ArgumentException or NotSupportedException)
+        {
+            // Housekeeping only; a locked or unreadable folder is not worth reporting.
+        }
+    }
+
+    private static bool TryParseInstallerVersion(string fileName, out Version version)
+    {
+        version = new Version(0, 0, 0);
+        const string prefix = "TubeForge-";
+        const string suffix = "-win-x64-setup.exe";
+        if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            !fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var text = fileName[prefix.Length..^suffix.Length];
+        return Version.TryParse(text, out var parsed) && (version = parsed) is not null;
+    }
+
+    /// <summary>
+    /// Removes installers left behind by earlier updates. Each one is roughly a quarter of a
+    /// gigabyte and nothing else ever deletes them, so the update folder grows without bound for
+    /// the lifetime of the installation.
+    /// </summary>
+    private static void PruneSupersededInstallers(string directory, string keepFileName)
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, "TubeForge-*-setup.exe"))
+            {
+                if (!Path.GetFileName(file).Equals(keepFileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    TryDelete(file);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          ArgumentException or NotSupportedException)
+        {
+            // Housekeeping must never fail a verified download.
+        }
+    }
 
     private static void TryDelete(string path)
     {

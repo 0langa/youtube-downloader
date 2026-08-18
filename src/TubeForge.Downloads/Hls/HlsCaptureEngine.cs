@@ -381,7 +381,10 @@ public sealed class HlsCaptureEngine
 
             var length = output.Length;
             output.Close();
-            File.Move(temporary, path);
+            // Overwrite deliberately: a part file can survive from a run that wrote the segment
+            // but was interrupted before its journal entry was persisted. Refusing to overwrite
+            // made every later resume fail on that same orphaned file.
+            File.Move(temporary, path, overwrite: true);
             return Result<DownloadedPart>.Success(new DownloadedPart(
                 new HlsPart(segment.Sequence, fileName, length, segment.Duration.Ticks),
                 initializationHash));

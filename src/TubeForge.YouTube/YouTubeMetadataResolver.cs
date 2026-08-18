@@ -19,6 +19,29 @@ public sealed class YouTubeMetadataResolver
     private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(20);
     private static readonly Uri DefaultOrigin = new("https://www.youtube.com/");
     private static readonly PlayerTransformCache TransformCache = new();
+
+    /// <summary>
+    /// Clients queried together on every analysis. Their ladders are complementary rather than
+    /// redundant, so both are resolved and merged instead of stopping at the first answer.
+    /// </summary>
+    private static readonly YouTubeClientProfile[] PrimaryProfiles =
+    [
+        YouTubeClientProfile.VisionOs,
+        YouTubeClientProfile.AndroidVr
+    ];
+
+    /// <summary>
+    /// Tried one at a time only when no primary client answers. These carry narrower ladders or
+    /// depend on provider attestation that is frequently unavailable, so they exist for
+    /// resilience rather than quality.
+    /// </summary>
+    private static readonly YouTubeClientProfile[] FallbackProfiles =
+    [
+        YouTubeClientProfile.Ios,
+        YouTubeClientProfile.Tv,
+        YouTubeClientProfile.WebEmbedded,
+        YouTubeClientProfile.Android
+    ];
     private readonly HttpClient _httpClient;
     private readonly Uri _origin;
     private readonly TimeSpan _requestTimeout;
@@ -104,14 +127,17 @@ public sealed class YouTubeMetadataResolver
                 return watchResult;
             }
 
-            var clientResult = await TryResolveWithDirectClientsAsync(
+            var clientOutcomes = new List<ClientProbeOutcome>();
+            var clientResults = await TryResolveWithDirectClientsAsync(
                 html,
                 watchResult.Value,
                 url,
+                clientOutcomes,
                 timeoutSource.Token).ConfigureAwait(false);
-            if (clientResult is not null && clientResult.Metadata.Formats.Count > 0)
+            if (clientResults.Count > 0)
             {
-                return Result<WatchPageData>.Success(MergeClientFormats(watchResult.Value, clientResult));
+                return Result<WatchPageData>.Success(
+                    MergeClientFormats(watchResult.Value, clientResults, clientOutcomes));
             }
 
             if (unresolvedActiveLive)
@@ -181,60 +207,159 @@ public sealed class YouTubeMetadataResolver
         }
     }
 
-    private static WatchPageData MergeClientFormats(WatchPageData watchPage, WatchPageData client)
+    /// <summary>
+    /// Combines every verified client ladder with any usable watch-page format into a single
+    /// offer set. No individual client exposes the complete ladder: the visionOS client carries
+    /// the highest video tiers while the Android VR client is the only one publishing the
+    /// high-bitrate and multichannel audio tiers, so taking the first client that answers loses
+    /// real quality the provider is willing to serve.
+    /// </summary>
+    private static WatchPageData MergeClientFormats(
+        WatchPageData watchPage,
+        IReadOnlyList<WatchPageData> clients,
+        IReadOnlyList<ClientProbeOutcome> outcomes)
     {
-        if (watchPage.Metadata.Formats.Count == 0)
+        var primary = clients[0];
+        if (clients.Count == 1 && watchPage.Metadata.Formats.Count == 0)
         {
-            return client;
+            return primary with
+            {
+                Diagnostics = new ExtractionDiagnostics(
+                    StageName(primary),
+                    ClientOutcomes: outcomes)
+            };
         }
 
-        var clientFormatIds = client.Metadata.Formats
-            .Select(format => format.FormatId)
-            .ToHashSet();
-        var formats = client.Metadata.Formats
-            .Concat(watchPage.Metadata.Formats.Where(format => !clientFormatIds.Contains(format.FormatId)))
-            .ToArray();
-        return client with
+        var formats = new List<StreamFormat>(primary.Metadata.Formats);
+        var known = formats.Select(format => format.FormatId).ToHashSet();
+        var contributors = new List<string> { StageName(primary) };
+
+        foreach (var client in clients.Skip(1))
         {
-            Metadata = client.Metadata with { Formats = formats },
-            PlayerScriptUrl = watchPage.PlayerScriptUrl ?? client.PlayerScriptUrl,
-            CipheredFormatCount = Math.Max(watchPage.CipheredFormatCount, client.CipheredFormatCount),
+            var added = false;
+            foreach (var format in client.Metadata.Formats.Where(format => known.Add(format.FormatId)))
+            {
+                formats.Add(format);
+                added = true;
+            }
+
+            if (added)
+            {
+                contributors.Add(StageName(client));
+            }
+        }
+
+        // Watch-page entries are only safe to offer when they need no player transform; a
+        // throttled URL downloads at a fraction of line speed instead of failing visibly.
+        var watchPageFormats = watchPage.Metadata.Formats
+            .Where(format => known.Add(format.FormatId) && !ThrottlingUrl.RequiresTransform(format.Url))
+            .ToArray();
+        if (watchPageFormats.Length > 0)
+        {
+            formats.AddRange(watchPageFormats);
+            contributors.Add("WatchPage");
+        }
+
+        return primary with
+        {
+            Metadata = primary.Metadata with { Formats = formats.ToArray() },
+            PlayerScriptUrl = watchPage.PlayerScriptUrl ?? primary.PlayerScriptUrl,
+            CipheredFormatCount = Math.Max(watchPage.CipheredFormatCount, primary.CipheredFormatCount),
             Diagnostics = new ExtractionDiagnostics(
-                (client.Diagnostics?.Stage ?? "ClientResolved") + "+WatchPage")
+                string.Join('+', contributors),
+                ClientOutcomes: outcomes)
         };
     }
 
-    private async Task<WatchPageData?> TryResolveWithDirectClientsAsync(
+    private static string StageName(WatchPageData data) => data.Diagnostics?.Stage ?? "ClientResolved";
+
+    /// <summary>
+    /// Resolves the primary clients concurrently and keeps every one whose media is reachable,
+    /// then falls back to the secondary clients one at a time only when no primary answered.
+    /// </summary>
+    private async Task<IReadOnlyList<WatchPageData>> TryResolveWithDirectClientsAsync(
         string html,
         WatchPageData fallback,
+        Uri watchUrl,
+        List<ClientProbeOutcome> outcomes,
+        CancellationToken cancellationToken)
+    {
+        var primary = await Task.WhenAll(PrimaryProfiles.Select(profile =>
+            TryResolveVerifiedClientAsync(html, fallback, profile, watchUrl, cancellationToken)))
+            .ConfigureAwait(false);
+        outcomes.AddRange(primary.Select(entry => entry.Outcome));
+        var accepted = primary
+            .Select(entry => entry.Data)
+            .Where(data => data is not null)
+            .Cast<WatchPageData>()
+            .ToList();
+        if (accepted.Count > 0)
+        {
+            return accepted;
+        }
+
+        foreach (var profile in FallbackProfiles)
+        {
+            var (data, outcome) = await TryResolveVerifiedClientAsync(
+                html,
+                fallback,
+                profile,
+                watchUrl,
+                cancellationToken).ConfigureAwait(false);
+            outcomes.Add(outcome);
+            if (data is not null)
+            {
+                return [data];
+            }
+        }
+
+        return [];
+    }
+
+    private async Task<(WatchPageData? Data, ClientProbeOutcome Outcome)> TryResolveVerifiedClientAsync(
+        string html,
+        WatchPageData fallback,
+        YouTubeClientProfile profile,
         Uri watchUrl,
         CancellationToken cancellationToken)
     {
         var requiresResolvedLiveManifest = fallback.Metadata.ContentKind == VideoContentKind.LiveActive;
-        foreach (var profile in new[]
-                 {
-                     YouTubeClientProfile.VisionOs,
-                     YouTubeClientProfile.AndroidVr,
-                     YouTubeClientProfile.WebEmbedded,
-                     YouTubeClientProfile.Tv,
-                     YouTubeClientProfile.Android
-                 })
+        var result = await TryResolveWithClientAsync(
+            html,
+            fallback,
+            profile,
+            cancellationToken).ConfigureAwait(false);
+        if (result is null)
         {
-            var result = await TryResolveWithClientAsync(
-                html,
-                fallback,
-                profile,
-                cancellationToken).ConfigureAwait(false);
-            if (result is not null && result.Metadata.Formats.Count > 0 &&
-                (!requiresResolvedLiveManifest || result.Metadata.Formats.Any(format =>
-                    format.IsLiveHls && !format.IsLiveManifestPending)) &&
-                await HasAccessibleMediaAsync(result, watchUrl, cancellationToken).ConfigureAwait(false))
-            {
-                return result;
-            }
+            return (null, new ClientProbeOutcome(profile.Name, ClientProbeResult.NoResponse));
         }
 
-        return null;
+        var formatCount = result.Metadata.Formats.Count;
+        if (formatCount == 0)
+        {
+            return (null, new ClientProbeOutcome(profile.Name, ClientProbeResult.NoFormats));
+        }
+
+        if (requiresResolvedLiveManifest && !result.Metadata.Formats.Any(format =>
+                format.IsLiveHls && !format.IsLiveManifestPending))
+        {
+            return (null, new ClientProbeOutcome(
+                profile.Name,
+                ClientProbeResult.LiveManifestMissing,
+                formatCount));
+        }
+
+        if (!await HasAccessibleMediaAsync(result, watchUrl, cancellationToken).ConfigureAwait(false))
+        {
+            // The client published a ladder its media servers will not actually serve over ranged
+            // reads. Offering it would produce downloads that stall partway through.
+            return (null, new ClientProbeOutcome(
+                profile.Name,
+                ClientProbeResult.MediaUnreachable,
+                formatCount));
+        }
+
+        return (result, new ClientProbeOutcome(profile.Name, ClientProbeResult.Accepted, formatCount));
     }
 
     private async Task<WatchPageData?> TryResolveWithClientAsync(

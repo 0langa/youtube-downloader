@@ -196,7 +196,11 @@ try {
             "-p:Version=$Version",
             '-p:ContinuousIntegrationBuild=true',
             "-p:PathMap=$repoRoot=/_/",
-            '-p:PublishSingleFile=false',
+            # Single-file publish: the loose layout wrote 265 files per install, and antivirus
+            # scanning them made the first launch after every update take 12-16 seconds against
+            # about 2 seconds for one bundled file.
+            '-p:PublishSingleFile=true',
+            '-p:IncludeNativeLibrariesForSelfExtract=true',
             '-p:PublishTrimmed=false',
             '-p:PublishReadyToRun=false'
         )

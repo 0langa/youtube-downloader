@@ -1,4 +1,3 @@
-using System.IO;
 using TubeForge.App.Commands;
 using TubeForge.Downloads.History;
 
@@ -6,17 +5,24 @@ namespace TubeForge.App.ViewModels;
 
 public sealed class HistoryItemViewModel
 {
+    private readonly Func<string, bool> _isPresent;
+
     public HistoryItemViewModel(
         DownloadHistoryEntry entry,
         Action<string> reveal,
-        Func<Guid, Task> remove)
+        Func<Guid, Task> remove,
+        Func<string, bool> isPresent)
     {
         Entry = entry ?? throw new ArgumentNullException(nameof(entry));
         ArgumentNullException.ThrowIfNull(reveal);
         ArgumentNullException.ThrowIfNull(remove);
+        _isPresent = isPresent ?? throw new ArgumentNullException(nameof(isPresent));
+        // Presence is answered from a cache the view model refreshes off the UI thread. Calling
+        // File.Exists here would stat every row during rendering, and a row pointing at a
+        // disconnected share would block the window for the length of the network timeout.
         RevealCommand = new RelayCommand(
             () => reveal(Entry.DestinationPath),
-            () => File.Exists(Entry.DestinationPath));
+            () => _isPresent(Entry.DestinationPath));
         RemoveCommand = new AsyncRelayCommand(() => remove(Entry.Id));
     }
 
@@ -28,7 +34,7 @@ public sealed class HistoryItemViewModel
 
     public string Detail =>
         $"{Entry.CompletedAtUtc.ToLocalTime():g} · {FormatBytes(Entry.BytesWritten)} · " +
-        (File.Exists(Entry.DestinationPath) ? "file available" : "file moved or deleted");
+        (_isPresent(Entry.DestinationPath) ? "file available" : "file moved or deleted");
 
     public string Destination => Entry.DestinationPath;
 

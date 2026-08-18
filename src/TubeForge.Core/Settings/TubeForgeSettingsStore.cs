@@ -51,7 +51,7 @@ public sealed class TubeForgeSettingsStore
 
             if (new FileInfo(_path).Length > MaximumFileBytes)
             {
-                return Corrupt();
+                return Corrupt(_path);
             }
 
             await using var stream = new FileStream(
@@ -67,14 +67,21 @@ public sealed class TubeForgeSettingsStore
                 cancellationToken).ConfigureAwait(false);
             if (settings is null)
             {
-                return Corrupt();
+                return Corrupt(_path);
             }
 
             settings = Migrate(settings);
             var validation = Validate(settings);
-            return validation is null
-                ? Result<TubeForgeSettings>.Success(settings)
-                : Result<TubeForgeSettings>.Failure(validation);
+            if (validation is null)
+            {
+                return Result<TubeForgeSettings>.Success(settings);
+            }
+
+            // The file is readable but this build cannot use it, which happens after a downgrade.
+            // Preserve it so the first save from defaults does not discard the user's real
+            // settings for good.
+            PreserveUnusableFile(_path);
+            return Result<TubeForgeSettings>.Failure(validation);
         }
         catch (OperationCanceledException)
         {
@@ -82,7 +89,7 @@ public sealed class TubeForgeSettingsStore
         }
         catch (JsonException)
         {
-            return Corrupt();
+            return Corrupt(_path);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -258,11 +265,38 @@ public sealed class TubeForgeSettingsStore
         };
     }
 
+    /// <summary>
+    /// Copies a settings file this build cannot read to a one-time sidecar. Without it the next
+    /// successful save silently overwrites the user's configuration with defaults.
+    /// </summary>
+    private static void PreserveUnusableFile(string path)
+    {
+        try
+        {
+            var backup = path + ".unreadable";
+            if (File.Exists(path) && !File.Exists(backup))
+            {
+                File.Copy(path, backup);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          ArgumentException or NotSupportedException)
+        {
+            // Best effort: failing to preserve must not turn a recoverable state into an error.
+        }
+    }
+
     private static TubeForgeError InvalidState() => new(
         "Settings.InvalidState",
         "One or more local settings are invalid.");
 
-    private static Result<TubeForgeSettings> Corrupt() =>
+    private static Result<TubeForgeSettings> Corrupt(string path)
+    {
+        PreserveUnusableFile(path);
+        return CorruptResult();
+    }
+
+    private static Result<TubeForgeSettings> CorruptResult() =>
         Failure("Settings.Corrupt", "The local settings file is malformed and was left unchanged.");
 
     private static Result<TubeForgeSettings> Failure(string code, string message, string? detail = null) =>

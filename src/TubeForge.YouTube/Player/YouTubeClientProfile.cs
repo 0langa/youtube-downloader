@@ -50,6 +50,16 @@ internal sealed record YouTubeClientProfile(
         "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold " +
         "(unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)");
 
+    public static YouTubeClientProfile Ios { get; } = new(
+        "IOS",
+        "5",
+        "20.29.6",
+        "com.google.ios.youtube/20.29.6 (iPhone16,2; U; CPU iOS 18_5 like Mac OS X)",
+        DeviceMake: "Apple",
+        DeviceModel: "iPhone16,2",
+        OsName: "iOS",
+        OsVersion: "18.5.22F76");
+
     public static YouTubeClientProfile Android { get; } = new(
         "ANDROID",
         "3",

@@ -64,14 +64,22 @@ static AnalysisPerformanceReport MeasureAnalysis(string repositoryRoot)
 
 static async Task<JsonElement> MeasureDesktopAsync(string repositoryRoot)
 {
-    var appPath = Path.Combine(
+    var buildDirectory = Path.Combine(
         repositoryRoot,
         "src",
         "TubeForge.App",
         "bin",
         "Release",
-        "net10.0-windows",
-        "TubeForge.dll");
+        "net10.0-windows");
+    // Measure the application host rather than "dotnet TubeForge.dll": the host is what users
+    // launch, and routing through the muxer adds startup cost that never ships.
+    var appPath = Path.Combine(buildDirectory, "TubeForge.exe");
+    var usesApplicationHost = File.Exists(appPath);
+    if (!usesApplicationHost)
+    {
+        appPath = Path.Combine(buildDirectory, "TubeForge.dll");
+    }
+
     if (!File.Exists(appPath))
     {
         throw new FileNotFoundException(
@@ -85,12 +93,16 @@ static async Task<JsonElement> MeasureDesktopAsync(string repositoryRoot)
     var reportPath = Path.Combine(workingDirectory, "desktop-report.json");
     try
     {
-        var startInfo = new ProcessStartInfo("dotnet")
+        var startInfo = new ProcessStartInfo(usesApplicationHost ? appPath : "dotnet")
         {
             UseShellExecute = false,
             WorkingDirectory = repositoryRoot
         };
-        startInfo.ArgumentList.Add(appPath);
+        if (!usesApplicationHost)
+        {
+            startInfo.ArgumentList.Add(appPath);
+        }
+
         startInfo.ArgumentList.Add("--performance-report");
         startInfo.ArgumentList.Add(reportPath);
         using var process = Process.Start(startInfo) ??

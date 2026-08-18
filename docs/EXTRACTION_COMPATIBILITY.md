@@ -2,6 +2,16 @@
 
 YouTube is an upstream service outside TubeForge's control. Compatibility is versioned by TubeForge release and verified with synthetic fixtures plus bounded public canaries; it is not a permanent guarantee.
 
+## Unreleased compatibility status
+
+TubeForge now asks both primary player clients on every analysis and combines whatever each one verifies, instead of stopping at the first client that answers. No single client publishes the whole ladder, so a first-client-wins design silently caps quality whenever the winning client happens to carry less.
+
+Measured against live public videos on 2026-08-18, the AndroidVR client advertises audio tiers the VisionOS client omits, including a 389 kbps multichannel AAC track. Those AndroidVR URLs are not downloadable without provider attestation: a request starting at byte 0 succeeds, every request at a later offset returns HTTP 403, and a sustained sequential read stops after roughly 2 MiB. End-of-stream verification therefore rejects that client, and TubeForge continues to offer only the tiers it can actually deliver — currently up to 160 kbps Opus or 130 kbps AAC for audio, alongside the full video ladder up to 4320p including AV1, VP9, HDR, and 60 fps. TubeForge does not generate PO tokens and does not use cookies, login, credentials, or access-control bypasses, so the attested audio tiers stay out of reach by design.
+
+Extraction diagnostics now record a per-client outcome (`Accepted`, `NoResponse`, `NoFormats`, `LiveManifestMissing`, `MediaUnreachable`) with the format count each client offered, so a client being excluded is visible instead of appearing as a smaller ladder with no explanation.
+
+Audio variants that share a format identifier are also disambiguated: a loudness-compressed (DRC) duplicate always declares a marginally higher bitrate than the original it was derived from, and a dubbed track can share the original's identifier. Both are ranked out before bitrate is considered.
+
 ## v2.2.9 compatibility status
 
 TubeForge v2.2.9 responds to selective GVS PO-token enforcement on the AndroidVR player client. Affected AndroidVR responses can still advertise adaptive formats, but their Googlevideo URLs fail end-of-stream or sustained-transfer checks while the progressive format 18 remains usable. TubeForge therefore prefers a current VisionOS public player profile before AndroidVR and retains strict end-of-stream verification. Token-gated and preview-only URLs remain rejected; TubeForge does not generate PO tokens or use cookies, login, credentials, or access-control bypasses.

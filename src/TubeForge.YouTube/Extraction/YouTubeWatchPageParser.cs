@@ -316,9 +316,7 @@ public static class YouTubeWatchPageParser
                 : isShort ? VideoContentKind.Short : VideoContentKind.Standard,
             LiveStartedAtUtc = liveStartedAtUtc,
             LiveEndedAtUtc = liveEndedAtUtc,
-            Formats = formats
-                .DistinctBy(format => format.FormatId)
-                .ToArray(),
+            Formats = SelectPreferredVariants(formats),
             CaptionTracks = MapCaptionTracks(root),
             Chapters = MapChapters(root, duration)
         };
@@ -626,7 +624,12 @@ public static class YouTubeWatchPageParser
             Bitrate = ReadInt64(element, "bitrate"),
             ContentLength = ReadStringInt64(element, "contentLength"),
             AudioSampleRate = ReadStringInt32(element, "audioSampleRate"),
-            IsHdr = ReadString(element, "qualityLabel")?.Contains("HDR", StringComparison.OrdinalIgnoreCase) == true,
+            AudioChannels = ReadInt32(element, "audioChannels"),
+            IsDrc = ReadBoolean(element, "isDrc"),
+            AudioLanguage = ReadAudioTrackLanguage(element),
+            IsOriginalAudio = ReadAudioTrackIsOriginal(element),
+            IsHdr = ReadString(element, "qualityLabel")?.Contains("HDR", StringComparison.OrdinalIgnoreCase) == true ||
+                    IsWideColourGamut(element),
             QualityLabel = ReadString(element, "qualityLabel") ?? ReadString(element, "audioQuality") ?? string.Empty
         };
         return true;
@@ -846,6 +849,94 @@ public static class YouTubeWatchPageParser
             : mimeType[start..end]
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
+
+    /// <summary>
+    /// Collapses provider variants that share a format identifier — loudness-compressed (DRC)
+    /// duplicates and dubbed audio tracks — keeping the original-language, uncompressed variant.
+    /// Ordering by declared bitrate alone would pick the DRC duplicate, which always reports a
+    /// marginally higher bitrate than the original it was derived from.
+    /// </summary>
+    internal static StreamFormat[] SelectPreferredVariants(IEnumerable<StreamFormat> formats)
+    {
+        var preferred = new Dictionary<int, StreamFormat>();
+        var order = new List<int>();
+        foreach (var format in formats)
+        {
+            if (!preferred.TryGetValue(format.FormatId, out var existing))
+            {
+                preferred.Add(format.FormatId, format);
+                order.Add(format.FormatId);
+                continue;
+            }
+
+            if (IsPreferredVariant(format, existing))
+            {
+                preferred[format.FormatId] = format;
+            }
+        }
+
+        return order.Select(id => preferred[id]).ToArray();
+    }
+
+    private static bool IsPreferredVariant(StreamFormat candidate, StreamFormat existing)
+    {
+        if (candidate.IsDrc != existing.IsDrc)
+        {
+            return !candidate.IsDrc;
+        }
+
+        if (candidate.IsOriginalAudio != existing.IsOriginalAudio)
+        {
+            return candidate.IsOriginalAudio;
+        }
+
+        return (candidate.Bitrate ?? 0) > (existing.Bitrate ?? 0);
+    }
+
+    private static string? ReadAudioTrackLanguage(JsonElement element)
+    {
+        if (!element.TryGetProperty("audioTrack", out var track) || track.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var id = ReadString(track, "id");
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        // Identifiers look like "en.4" or "de-DE.3"; only the language part is meaningful here.
+        var separator = id.IndexOf('.');
+        var language = separator > 0 ? id[..separator] : id;
+        return language.Length is > 0 and <= 32 ? language : null;
+    }
+
+    private static bool ReadAudioTrackIsOriginal(JsonElement element)
+    {
+        if (!element.TryGetProperty("audioTrack", out var track) || track.ValueKind != JsonValueKind.Object)
+        {
+            // A video with a single audio track exposes no audioTrack object at all.
+            return true;
+        }
+
+        if (ReadBoolean(track, "audioIsDefault"))
+        {
+            return true;
+        }
+
+        var displayName = ReadString(track, "displayName");
+        return displayName?.Contains("original", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    /// <summary>
+    /// Detects BT.2020 primaries, which identify an HDR ladder entry even when the provider omits
+    /// the "HDR" suffix from the quality label.
+    /// </summary>
+    private static bool IsWideColourGamut(JsonElement element) =>
+        element.TryGetProperty("colorInfo", out var colour) &&
+        colour.ValueKind == JsonValueKind.Object &&
+        ReadString(colour, "primaries")?.Equals("COLOR_PRIMARIES_BT2020", StringComparison.OrdinalIgnoreCase) == true;
 
     private static VideoCodec ParseVideoCodec(IEnumerable<string> codecs)
     {
