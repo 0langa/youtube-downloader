@@ -43,6 +43,52 @@ public static class AdaptiveDownloadEngineTests
     }
 
     [Test]
+    public static async Task SignalsEndOfTheNetworkPhaseBeforeMuxingStarts()
+    {
+        using var directory = new AdaptiveTestDirectory();
+        var video = SyntheticMp4.Track("vide", "VIDEO-SAMPLES"u8, 1, 90_000, 450_000);
+        var audio = SyntheticMp4.Track("soun", "AUDIO-SAMPLES"u8, 1, 48_000, 240_000);
+        using var handler = new MediaHandler(video, audio);
+        using var client = new HttpClient(handler);
+        var direct = new DirectDownloadEngine(
+            client,
+            DownloadUriPolicy.YouTubeMediaAndLoopback,
+            (_, _) => Task.CompletedTask);
+        var engine = new AdaptiveDownloadEngine(direct);
+        var output = Path.Combine(directory.Path, "combined.mp4");
+        var videoTrack = output + ".video-track.mp4";
+        var audioTrack = output + ".audio-track.m4a";
+        var signals = 0;
+        var tracksOnDiskAtSignal = false;
+        var outputExistedAtSignal = true;
+
+        var result = await engine.DownloadAsync(
+            new AdaptiveDownloadRequest
+            {
+                Video = Request("video", videoTrack, video.Length, MediaContainer.Mp4),
+                Audio = Request("audio", audioTrack, audio.Length, MediaContainer.Mp4),
+                DestinationPath = output,
+                OutputContainer = MediaContainer.Mp4
+            },
+            progress: null,
+            cancellationToken: default,
+            networkPhaseCompleted: () =>
+            {
+                signals++;
+                tracksOnDiskAtSignal = File.Exists(videoTrack) && File.Exists(audioTrack);
+                outputExistedAtSignal = File.Exists(output);
+            });
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        // The caller releases its per-host transfer slot on this signal, so it has to arrive once
+        // both tracks are down and before the local mux — otherwise the slot stays held for the
+        // length of the mux and blocks every other transfer.
+        Assert.Equal(1, signals);
+        Assert.True(tracksOnDiskAtSignal);
+        Assert.False(outputExistedAtSignal);
+    }
+
+    [Test]
     public static async Task RecoversPublishedMp4BeforeRedownloadingMissingTracks()
     {
         using var directory = new AdaptiveTestDirectory();

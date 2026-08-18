@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Release the per-host transfer slot as soon as a job's network phase ends, in every download
+  path. It was still held across adaptive muxing and full re-encodes, so one converting job
+  blocked other transfers to the same host for the length of the conversion.
+
 ## 2.3.0 - 2026-08-18
 
 ### Startup
@@ -25,7 +29,7 @@
 - Keep a completed adaptive download completed when an intermediate track cannot be deleted.
 - Allow a live capture to resume over a segment file left by an interrupted run.
 - Flush segment data to the device before recording the segment as complete.
-- Release the per-host transfer lease before local FFmpeg work rather than holding it throughout.
+- Release the per-host transfer lease before the post-processing steps that follow a completed transfer.
 
 ### Media selection
 

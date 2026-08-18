@@ -34,7 +34,7 @@ Extraction diagnostics record a per-client outcome and format count, so a client
 - Segment data is flushed to the device before the segment is recorded complete, so an interrupted transfer cannot resume over unwritten regions.
 - A live capture can resume over a segment file left by an interrupted run.
 - A completed adaptive download is no longer reported as failed when an intermediate track cannot be deleted.
-- The per-host transfer slot is released before local FFmpeg work instead of being held throughout.
+- The per-host transfer slot is released before the post-processing steps that follow a completed transfer.
 
 ## Housekeeping
 

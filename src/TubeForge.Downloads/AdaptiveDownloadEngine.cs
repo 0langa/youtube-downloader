@@ -15,10 +15,16 @@ public sealed class AdaptiveDownloadEngine(
         directDownloadEngine ?? throw new ArgumentNullException(nameof(directDownloadEngine));
     private readonly FfmpegMediaProcessor? _ffmpegMediaProcessor = ffmpegMediaProcessor;
 
+    /// <param name="networkPhaseCompleted">
+    /// Raised once both tracks are on disk and before muxing begins. Muxing is local work, so a
+    /// caller holding a per-host transfer slot can release it here instead of blocking other
+    /// transfers for the length of the mux.
+    /// </param>
     public async Task<Result<AdaptiveDownloadReceipt>> DownloadAsync(
         AdaptiveDownloadRequest request,
         IProgress<DownloadProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action? networkPhaseCompleted = null)
     {
         var validation = ValidateRequest(request);
         if (validation is not null)
@@ -32,6 +38,7 @@ public sealed class AdaptiveDownloadEngine(
             _ffmpegMediaProcessor is not null &&
             File.Exists(request.DestinationPath))
         {
+            networkPhaseCompleted?.Invoke();
             var recovered = await _ffmpegMediaProcessor.MuxAsync(
                     request.Video.DestinationPath,
                     request.Audio.DestinationPath,
@@ -73,6 +80,7 @@ public sealed class AdaptiveDownloadEngine(
             return Result<AdaptiveDownloadReceipt>.Failure(audioResult.Error!);
         }
 
+        networkPhaseCompleted?.Invoke();
         var muxResult = await MuxTracksAsync(request, cancellationToken).ConfigureAwait(false);
         if (!muxResult.IsSuccess)
         {

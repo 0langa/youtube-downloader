@@ -3104,9 +3104,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var progress = new Progress<DownloadProgress>(value => UpdateQueueProgress(itemId, value));
             TubeForgeError? downloadError;
             long completedBytes;
+            // The per-host slot exists to bound concurrent requests to one media host. Everything
+            // after a track reaches disk — muxing, remuxing, transcoding — is local FFmpeg work,
+            // so the slot is released at the end of each branch's network phase rather than being
+            // held for the whole run. Releasing is idempotent, so the backstop below is safe.
             using var mediaLease = await _hostRequestGate.EnterAsync(
                 work.Selection.Format.Url,
                 cancellation.Token);
+            var releaseTransferSlot = mediaLease.Dispose;
             if (work.Output.IsAudioTranscode)
             {
                 var sourcePath = AudioSourcePath(work.Destination, work.Selection.Format);
@@ -3121,9 +3126,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
                 else
                 {
-            // The per-host lease guards network requests only. FFmpeg work that follows is local,
-            // and holding the lease across it stalls every other transfer and any live capture.
-            mediaLease.Dispose();
+                    releaseTransferSlot();
                     StatusMessage = work.Output.BitrateKbps > 0
                         ? $"Converting to {work.Output.DisplayName} · {work.Output.BitrateKbps} kbps"
                         : $"Converting to {work.Output.DisplayName}";
@@ -3168,6 +3171,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
                 else
                 {
+                    releaseTransferSlot();
                     StatusMessage = $"Transcoding to {work.Output.DisplayName} · local FFmpeg";
                     UpdateQueueProcessing(itemId, StatusMessage);
                     var transcodeResult = await _videoTranscoder.TranscodeAsync(new VideoTranscodeRequest
@@ -3211,7 +3215,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     DestinationPath = work.Destination,
                     OutputContainer = outputContainer,
                     AllowExistingValidatedOutput = true
-                }, progress, cancellation.Token);
+                }, progress, cancellation.Token, releaseTransferSlot);
                 downloadError = result.Error;
                 completedBytes = result.IsSuccess
                     ? result.Value.BytesWritten
@@ -3225,6 +3229,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     work.Selection.Format);
                 if (File.Exists(work.Destination))
                 {
+                    releaseTransferSlot();
                     var recovered = await _mediaProcessor.RemuxMp4Async(
                         sourcePath,
                         work.Destination,
@@ -3255,6 +3260,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     }
                     else
                     {
+                        releaseTransferSlot();
                         StatusMessage = "Finalizing compatible MP4 · stream copy, no quality loss";
                         var processResult = await _mediaProcessor.RemuxMp4Async(
                             sourcePath,
@@ -3284,7 +3290,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     : SelectionPartialLength(work.Destination, work.Selection, work.Output);
             }
 
-            mediaLease.Dispose();
+            releaseTransferSlot();
             if (downloadError?.Code == "Network.RateLimited")
             {
                 _hostRequestGate.Defer(work.Selection.Format.Url, downloadError.RetryAfter);
