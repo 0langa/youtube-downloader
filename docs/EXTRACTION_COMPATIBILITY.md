@@ -2,6 +2,12 @@
 
 YouTube is an upstream service outside TubeForge's control. Compatibility is versioned by TubeForge release and verified with synthetic fixtures plus bounded public canaries; it is not a permanent guarantee.
 
+## v2.2.9 compatibility status
+
+TubeForge v2.2.9 responds to selective GVS PO-token enforcement on the AndroidVR player client. Affected AndroidVR responses can still advertise adaptive formats, but their Googlevideo URLs fail end-of-stream or sustained-transfer checks while the progressive format 18 remains usable. TubeForge therefore prefers a current VisionOS public player profile before AndroidVR and retains strict end-of-stream verification. Token-gated and preview-only URLs remain rejected; TubeForge does not generate PO tokens or use cookies, login, credentials, or access-control bypasses.
+
+Deterministic resolver coverage verifies the VisionOS identity and user agent, fallback order, adaptive augmentation, active-live handling, and player-style tail request shape. Two bounded authorized public canaries resolved complete adaptive ladders through `ClientResolved:VISIONOS+WatchPage`, including up to 1440p video and five audio tracks. Full transfer proof downloaded and decoded an 83,028,734-byte AAC track; a separate affected canary produced a 1920x1080 H.264 plus AAC stream-copy MP4 that passed full decode. Canary identifiers, titles, destinations, and signed media URLs are intentionally not committed.
+
 ## v2.2.8 compatibility status
 
 TubeForge v2.2.8 aligns adaptive-media accessibility checks with the direct and segmented download engines. Non-HLS Googlevideo probes use bounded player-style `range`, `rn`, and `rbuf` query parameters; public HLS manifests retain HTTP header-range probes. This avoids discarding a valid adaptive format ladder when a media endpoint accepts the download transport but rejects a header-range probe, which previously could leave only a 360p progressive fallback visible in the app.
@@ -92,7 +98,7 @@ The live 4K canary resolved 27 formats and selected 2160p MP4 video plus AAC aud
 - arbitrary JavaScript execution or general-purpose JavaScript evaluation;
 - formats whose container/codec combination the supported finalization pipeline cannot represent safely.
 
-TubeForge v2.2.8 supports bounded public unencrypted HLS capture plus explicit H.264/AAC, H.265/AAC, and VP9/Opus conversion profiles. HLS playlists remain independently bounded to 8 MiB, 5,000 segments, 20,000 lines, and existing trusted-host and URI limits. Authenticated/access-controlled media and encrypted/DRM HLS remain unsupported.
+TubeForge v2.2.9 supports bounded public unencrypted HLS capture plus explicit H.264/AAC, H.265/AAC, and VP9/Opus conversion profiles. HLS playlists remain independently bounded to 8 MiB, 5,000 segments, 20,000 lines, and existing trusted-host and URI limits. Authenticated/access-controlled media and encrypted/DRM HLS remain unsupported.
 
 Malformed, oversized, or unsupported player scripts fail closed. When public extraction changes, follow the [extractor maintenance playbook](EXTRACTOR_PLAYBOOK.md) and add a sanitized synthetic regression before changing a client profile or transform rule.
 

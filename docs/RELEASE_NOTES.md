@@ -1,22 +1,22 @@
-# TubeForge v2.2.8
+# TubeForge v2.2.9
 
-TubeForge v2.2.8 fixes a false 360p-only fallback affecting some public videos whose actual YouTube format ladder includes separate high-resolution video and audio streams. Adaptive Googlevideo accessibility checks now use the same bounded player-style query ranges as the download engines instead of HTTP `Range` headers that some media endpoints reject.
+TubeForge v2.2.9 restores high-resolution video plus audio for public videos affected by selective GVS PO-token enforcement on YouTube's AndroidVR player client. AndroidVR can advertise a complete adaptive ladder while only its progressive 360p format remains fully downloadable without a token. TubeForge now tries a current public VisionOS player profile first and continues to verify every returned media URL at its end before presenting it as downloadable.
 
 > [!IMPORTANT]
-> TubeForge v2.1.0 can detect a newer release, but its installed binary cannot enable the update button and does not contain the startup prompt. It cannot repair itself. If you are running v2.1.0, download and run `TubeForge-2.2.8-win-x64-setup.exe` once from the official release. Updates after that can use the in-app flow.
+> TubeForge v2.1.0 can detect a newer release, but its installed binary cannot enable the update button and does not contain the startup prompt. It cannot repair itself. If you are running v2.1.0, download and run `TubeForge-2.2.9-win-x64-setup.exe` once from the official release. Updates after that can use the in-app flow.
 
 Choose the per-user Windows x64 installer for normal use or a portable archive when needed. Verify `SHA256SUMS.txt` before running or extracting an asset. GitHub Actions release artifacts carry build-provenance attestations; the release manifest states whether Windows executables also have an Authenticode signature.
 
 Highlights:
 
-- use bounded `range`, `rn`, and `rbuf` query parameters for direct Googlevideo media probes, matching actual direct and segmented downloads;
-- retain HTTP header ranges for public HLS manifest probes;
-- keep strict HTTPS Googlevideo redirect validation and per-format provider user agents;
-- preserve adaptive MP4, WebM, and MKV video-plus-audio selection instead of falling back to a lone progressive stream after a false probe rejection;
-- label direct-client extraction truthfully as `DIRECT STREAMS VERIFIED` in the desktop app;
-- add deterministic coverage proving query-range probes for direct-client fallback, transformed watch-page media, and high-resolution adaptive video/audio pairs.
+- prefer a current VisionOS public player profile before AndroidVR for direct-format fallback and watch-page adaptive augmentation;
+- retain bounded player-style end-of-stream probes so token-gated and preview-only media URLs fail closed;
+- preserve adaptive MP4, WebM, and MKV video-plus-audio selection from directly downloadable streams;
+- keep strict HTTPS Googlevideo redirect validation and the exact per-client user agent through probing and download;
+- add deterministic coverage for VisionOS identity, fallback order, adaptive pairing, active-live resolution, and tail request shape;
+- remain public and tokenless: no PO-token generation, cookies, login, credential collection, or access-control bypass.
 
-Pre-release verification covered 266 deterministic tests, a zero-warning Release build, formatter validation, the core parser performance budget, archive checksum/dependency-layout/desktop-launch checks, and installer checksum/embedded-payload checks. A bounded authorized public canary exposed 23 formats and produced a 1920x1080 H.264 plus AAC MP4 that passed full mapped decode and Windows media-stack playback. Published artifacts are rebuilt and reverified from the immutable release tag by GitHub Actions.
+Pre-release verification covered 266 deterministic tests, a zero-warning Release build, formatter validation, the core parser performance budget, archive checksum/dependency-layout/desktop-launch checks, and installer checksum/embedded-payload checks. Two bounded authorized public canaries resolved complete adaptive ladders through VisionOS, including up to 1440p video and five audio tracks. Full transfer proof downloaded and decoded an 83,028,734-byte AAC track; a separate affected canary produced a 1920x1080 H.264 plus AAC MP4 that passed full decode. Published artifacts are rebuilt and reverified from the immutable release tag by GitHub Actions.
 
 Security and support boundaries:
 

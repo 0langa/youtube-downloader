@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.2.9 - 2026-08-18
+
+- Prefer a current public VisionOS player profile before AndroidVR, restoring directly downloadable adaptive video and audio ladders when AndroidVR exposes only the 360p progressive format without a GVS PO token.
+- Retain end-of-stream verification for every direct format so preview-only or token-gated URLs still fail closed instead of appearing as downloadable output.
+- Keep extraction public and tokenless: no PO-token generation, cookies, login, credential collection, or access-control bypass.
+- Cover the VisionOS identity, user agent, fallback order, adaptive augmentation, live resolution, and player-style tail probes with deterministic regressions.
+
 ## 2.2.8 - 2026-08-13
 
 - Probe adaptive Googlevideo media with the same bounded player-style query ranges used by the download engines, preventing valid high-resolution video and companion audio from being discarded when a server rejects HTTP `Range` headers.

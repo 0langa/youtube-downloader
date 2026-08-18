@@ -12,6 +12,17 @@ internal sealed record YouTubeClientProfile(
     string? OsVersion = null,
     bool IsEmbedded = false)
 {
+    public static YouTubeClientProfile VisionOs { get; } = new(
+        "VISIONOS",
+        "101",
+        "1.02",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 " +
+        "(KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+        DeviceMake: "Apple",
+        DeviceModel: "RealityDevice17,1",
+        OsName: "visionOS",
+        OsVersion: "26.5.23O471");
+
     public static YouTubeClientProfile AndroidVr { get; } = new(
         "ANDROID_VR",
         "28",

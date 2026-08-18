@@ -215,7 +215,7 @@ public static class YouTubeMetadataResolverTests
     }
 
     [Test]
-    public static async Task UsesTailVerifiedNoTokenClientWhenPageHasNoDirectFormats()
+    public static async Task UsesTailVerifiedVisionOsClientWhenPageHasNoDirectFormats()
     {
         const string watchPage = """
             <script>
@@ -263,7 +263,7 @@ public static class YouTubeMetadataResolverTests
                 Assert.Equal("9-9", QueryValue(request.RequestUri!, "range"));
                 Assert.Equal("0", QueryValue(request.RequestUri!, "rn"));
                 Assert.Equal("0", QueryValue(request.RequestUri!, "rbuf"));
-                Assert.True(request.Headers.UserAgent.ToString().Contains("youtube.vr.oculus", StringComparison.Ordinal));
+                Assert.True(request.Headers.UserAgent.ToString().Contains("Version/26.0", StringComparison.Ordinal));
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new ByteArrayContent([0])
@@ -272,8 +272,8 @@ public static class YouTubeMetadataResolverTests
 
             Assert.Equal(HttpMethod.Post, request.Method);
             Assert.Equal("/youtubei/v1/player", request.RequestUri?.AbsolutePath);
-            Assert.True(request.Headers.Contains("X-YouTube-Client-Name"));
-            Assert.True(request.Headers.Contains("X-YouTube-Client-Version"));
+            Assert.Equal("101", request.Headers.GetValues("X-YouTube-Client-Name").Single());
+            Assert.Equal("1.02", request.Headers.GetValues("X-YouTube-Client-Version").Single());
             Assert.Equal("application/json", request.Content?.Headers.ContentType?.MediaType);
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(playerResponse) };
         });
@@ -289,7 +289,7 @@ public static class YouTubeMetadataResolverTests
         Assert.Equal("en", result.Value.Metadata.CaptionTracks[0].LanguageCode);
         Assert.Equal("Android metadata", result.Value.Metadata.Title);
         Assert.Equal(VideoContentKind.Short, result.Value.Metadata.ContentKind);
-        Assert.Equal("ClientResolved:ANDROID_VR", result.Value.Diagnostics?.Stage);
+        Assert.Equal("ClientResolved:VISIONOS", result.Value.Diagnostics?.Stage);
         Assert.Equal(3, requestCount);
     }
 
@@ -371,7 +371,7 @@ public static class YouTubeMetadataResolverTests
         var selection = AdaptiveFormatSelector.SelectBest(result.Value.Metadata.Formats);
         Assert.Equal(3, result.Value.Metadata.Formats.Count);
         Assert.Equal(1, result.Value.Metadata.Formats.Count(format => format.FormatId == 18));
-        Assert.Equal("ClientResolved:ANDROID_VR+WatchPage", result.Value.Diagnostics?.Stage);
+        Assert.Equal("ClientResolved:VISIONOS+WatchPage", result.Value.Diagnostics?.Stage);
         Assert.True(selection?.RequiresMuxing == true);
         Assert.Equal(401, selection!.Video.FormatId);
         Assert.Equal(140, selection.Audio!.FormatId);
@@ -447,7 +447,7 @@ public static class YouTubeMetadataResolverTests
         Assert.True(result.IsSuccess, result.Error?.Message);
         Assert.Equal("ClientResolved:TVHTML5", result.Value.Diagnostics?.Stage);
         Assert.Equal(18, result.Value.Metadata.Formats.Single().FormatId);
-        Assert.SequenceEqual(new[] { "28", "56", "7" }, clientNames);
+        Assert.SequenceEqual(new[] { "101", "28", "56", "7" }, clientNames);
     }
 
     [Test]
@@ -480,7 +480,7 @@ public static class YouTubeMetadataResolverTests
 
             if (request.Method == HttpMethod.Post)
             {
-                Assert.Equal("28", request.Headers.GetValues("X-YouTube-Client-Name").Single());
+                Assert.Equal("101", request.Headers.GetValues("X-YouTube-Client-Name").Single());
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(playerResponse) };
             }
 
@@ -498,7 +498,7 @@ public static class YouTubeMetadataResolverTests
         Assert.Equal(VideoContentKind.LiveActive, result.Value.Metadata.ContentKind);
         Assert.True(result.Value.Metadata.Formats.Single().IsLiveHls);
         Assert.False(result.Value.Metadata.Formats.Single().IsLiveManifestPending);
-        Assert.Equal("ClientResolved:ANDROID_VR+WatchPage", result.Value.Diagnostics?.Stage);
+        Assert.Equal("ClientResolved:VISIONOS+WatchPage", result.Value.Diagnostics?.Stage);
         Assert.Equal(3, requestCount);
     }
 
@@ -529,7 +529,7 @@ public static class YouTubeMetadataResolverTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Video.LiveManifestUnavailable", result.Error?.Code);
-        Assert.Equal(5, requestCount);
+        Assert.Equal(6, requestCount);
     }
 
     private static string? QueryValue(Uri uri, string key)

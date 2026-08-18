@@ -213,6 +213,7 @@ public sealed class YouTubeMetadataResolver
         var requiresResolvedLiveManifest = fallback.Metadata.ContentKind == VideoContentKind.LiveActive;
         foreach (var profile in new[]
                  {
+                     YouTubeClientProfile.VisionOs,
                      YouTubeClientProfile.AndroidVr,
                      YouTubeClientProfile.WebEmbedded,
                      YouTubeClientProfile.Tv,
