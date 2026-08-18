@@ -19,6 +19,28 @@ if ([string]::IsNullOrWhiteSpace($ReleaseDirectory)) {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Remove-DirectoryWithRetry([string] $Path) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    # Verification extracts and then runs ffmpeg.exe. A virus scanner or the just-exited child
+    # process can still hold a handle for a moment afterwards, which previously failed an entire
+    # release on a cleanup step that says nothing about whether the artifacts are correct.
+    for ($attempt = 1; $attempt -le 20; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force
+            return
+        }
+        catch {
+            if ($attempt -eq 20) {
+                throw
+            }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
+
 $releaseRoot = [IO.Path]::GetFullPath($ReleaseDirectory)
 $verificationRoot = [IO.Path]::GetFullPath((Join-Path $releaseRoot ".verify-$Version"))
 
@@ -178,7 +200,7 @@ try {
 finally {
     if (Test-Path -LiteralPath $verificationRoot) {
         Assert-StrictChildPath -Path $verificationRoot -Parent $releaseRoot
-        Remove-Item -LiteralPath $verificationRoot -Recurse -Force
+        Remove-DirectoryWithRetry -Path $verificationRoot
     }
 }
 
